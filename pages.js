@@ -199,7 +199,7 @@ async function runBatch(redo) {
 function askEngine() {
   return new Promise(resolve => {
     const d = $('engineDlg'); let pick = null;
-    const done = v => { pick = v; d.close(); };
+    const done = v => { pick = v; resolve(v); if (d.open) d.close(); }; // 不依賴 close 事件，直接回傳選擇
     $('engApi').onclick = () => done('api'); $('engLocal').onclick = () => done('local'); $('engCancel').onclick = () => done(null);
     d.onclose = () => { d.onclose = null; resolve(pick); };
     d.showModal();
@@ -432,9 +432,12 @@ function pvRender(opts = {}) {
   $('dataType').value = dataType(is); $('dataType').disabled = !is.id;
   const sc = suggCount(); $('pvAdoptAll').hidden = !sc; $('pvAdoptAll').textContent = '採用全部 AI 頁碼建議（' + sc + '）';
   const c = pvProgress();
+  // 統計卡
+  $('stTotal').textContent = n; $('stOk').textContent = c.ok; $('stOkPct').textContent = (n ? Math.round(c.ok / n * 100) : 0) + '%';
+  $('stRev').textContent = c.review; $('stBad').textContent = '缺題名 ' + c.bad; $('stInh').textContent = c.inh; $('stNone').textContent = '未分析 ' + c.none;
   // 頂端按鈕
   const b = PV.batch && PV.batch.is === is ? PV.batch : null;
-  $('pvStop').hidden = !b; $('pvBatch').disabled = !!b || !n;
+  $('pvStop').hidden = !b; $('pvBatch').disabled = !!b || !n; $('pvBatch').classList.toggle('loading', !!b);
   $('pvBatch').textContent = b ? `分析中 ${b.done}／${b.total}` : (c.none === n ? `分析整期（${n} 頁）` : c.none > 0 ? `繼續分析（尚餘 ${c.none} 頁）` : '重新分析未確認的頁面');
   // 篩選
   const fb = $('pvFilters'); fb.replaceChildren();
@@ -445,7 +448,7 @@ function pvRender(opts = {}) {
   // 清單
   box.replaceChildren();
   for (const k in rowRefs) delete rowRefs[k];
-  if (!n) box.append(Object.assign(h('div', 'pv-hint', is.id ? '這一期沒有影像。請把圖檔放進 img 資料夾裡這一期的資料夾。' : '請先在上方選擇期刊。'), { style: 'margin:12px' }));
+  if (!n) box.append(h('div', 'empty', is.id ? '這一期沒有影像。請把圖檔放進 img 資料夾裡這一期的資料夾。' : '請先在左下角的「資料」選單選擇一筆資料。'));
   is.pages.forEach((p, i) => {
     const s = pvStatus(i);
     if (PV.filter !== 'all' && s !== PV.filter && !(PV.filter === 'nopno' && !p.pno) && !(PV.filter === 'jump' && pnoFlagged(is, i)) && !(PV.filter === 'sugg' && pnoSuggested(is, i)) && i !== PV.sel) return;
@@ -486,7 +489,7 @@ function applyToCatalog() {
   if (orphan) notes.push(`開頭 ${orphan} 頁沒有標題可歸屬，不會出現在篇目裡`);
   const msg = `將產生 ${entries.length} 筆篇目` + (is.entries.length ? `，並取代目前篇目目錄裡的 ${is.entries.length} 筆（含層級與排序）` : '') + '。' + (notes.length ? '\n\n注意：\n・' + notes.join('\n・') : '') + '\n\n確定套用？';
   if (!confirm(msg)) return;
-  is.entries = entries; selectedId = null;
+  is.entries = entries; selectedId = null; sortEntries(is.entries, is.pages);
   persist(); setMode('catalog'); toast(`已套用，共 ${entries.length} 筆篇目`);
 }
 $('pvApply').onclick = applyToCatalog;
@@ -614,7 +617,7 @@ $('dataType').onchange = () => {
 function cancelPick() {
   const k = PV.pick; if (!k) return;
   PV.pick = null; k.el.remove(); k.btn.classList.remove('on', 'busy');
-  $('pvViewer').classList.remove('picking');
+  k.box.classList.remove('picking');
 }
 // 畫面座標（相對 viewer）→ 影像座標，裁成 JPEG（長邊最多 1600），回傳 base64
 function cropToB64(x, y, w, h) {
@@ -632,13 +635,26 @@ function cropToB64(x, y, w, h) {
 async function ocrRegion(key, b64) {
   return parse(await api('analyze.php', { book: issue().id, mode: 'ocr', engine: 'local', field: key, image: b64 }), {}).text || '';
 }
-function startPick(btn, run) {
+// 影像檢視器：逐頁核對（pvViewer）與篇目目錄（viewer）各有自己的縮放／旋轉，各自提供「畫面座標 → 裁切」
+const pvCtx = () => ({ box: $('pvViewer'), img: $('pvImg'), crop: cropToB64 });
+function cropCatalog(x, y, w, h) {
+  const img = $('pageImg'), s = view.s, nw = img.naturalWidth, nh = img.naturalHeight;
+  const cw = w / s, ch = h / s; if (cw < 4 || ch < 4) return null;
+  const k = Math.min(1, 1600 / Math.max(cw, ch)), c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(cw * k)); c.height = Math.max(1, Math.round(ch * k));
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+  g.setTransform(k, 0, 0, k, 0, 0); g.translate((view.cx - x) / s, (view.cy - y) / s); g.rotate(view.r * Math.PI / 180); g.translate(-nw / 2, -nh / 2); g.drawImage(img, 0, 0);
+  return c.toDataURL('image/jpeg', 0.92).split(',')[1];
+}
+const catalogCtx = () => ({ box: $('viewer'), img: $('pageImg'), crop: cropCatalog });
+function startPick(btn, run, vctx) {
   cancelPick();
-  const box = $('pvViewer');
-  if (!$('pvImg').naturalWidth) return toast('這一頁的影像還沒載入');
+  vctx = vctx || pvCtx();
+  const box = vctx.box;
+  if (!vctx.img.naturalWidth) return toast('這一頁的影像還沒載入');
   const el = h('div', 'pv-pick'), hint = h('div', 'pv-pick-hint', '拖曳框選要辨識的文字（可用滾輪放大）・Esc 取消'), sel = h('div', 'pv-sel');
   sel.hidden = true; el.append(hint, sel); box.append(el); box.classList.add('picking'); btn.classList.add('on');
-  const k = PV.pick = { btn, el, busy: false };
+  const k = PV.pick = { btn, el, box, busy: false };
   let st = null;
   const place = (x1, y1, x2, y2) => { sel.style.left = Math.min(x1, x2) + 'px'; sel.style.top = Math.min(y1, y2) + 'px'; sel.style.width = Math.abs(x2 - x1) + 'px'; sel.style.height = Math.abs(y2 - y1) + 'px'; };
   const pos = e => { const r = box.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
@@ -654,7 +670,7 @@ function startPick(btn, run) {
     const [x, y] = pos(e), x0 = Math.min(st.x, x), y0 = Math.min(st.y, y), w = Math.abs(x - st.x), hh = Math.abs(y - st.y);
     st = null;
     if (w < 8 || hh < 8) { sel.hidden = true; return; } // 太小視為誤點，讓使用者重框
-    const b64 = cropToB64(x0, y0, w, hh);
+    const b64 = vctx.crop(x0, y0, w, hh);
     if (!b64) { sel.hidden = true; return toast('框選範圍在影像之外，請重新框選'); }
     k.busy = true; sel.className = 'pv-sel scan'; hint.textContent = 'AI 辨識中…'; btn.classList.add('busy');
     try { await run(b64); } catch (err) { toast(err.message || String(err)); }
@@ -662,21 +678,52 @@ function startPick(btn, run) {
     setTimeout(() => { if (PV.pick === k) cancelPick(); }, 700);
   });
 }
-function aiPickBtn(key, inp, r, refresh) {
-  const b = h('button', 'ai-btn', 'AI'); b.type = 'button';
+function aiPickBtn(key, inp, r, refresh, vctx) {
+  const b = h('button', 'ai-btn'); b.type = 'button';
+  b.innerHTML = '<span class="ai-star" aria-hidden="true"></span>';
   b.title = '框選圖片中的文字，用 AI 辨識後填入這個欄位'; b.setAttribute('aria-label', 'AI 框選辨識');
   b.onclick = () => {
     if (PV.pick && PV.pick.btn === b) return cancelPick();
     startPick(b, async b64 => {
       const text = (await ocrRegion(key, b64)).trim();
       if (!text) return toast('框選範圍內沒有辨識到文字，請重新框選');
-      inp.value = text; r[key] = text; touch(r); refresh();
+      inp.value = text;
+      if (r) { r[key] = text; touch(r); refresh(); } else inp.dispatchEvent(new Event('input', { bubbles: true }));
       inp.classList.add('ai-filled'); setTimeout(() => inp.classList.remove('ai-filled'), 1600);
-    });
+    }, vctx);
   };
   return b;
 }
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && PV.pick && !PV.pick.busy) cancelPick(); });
 
+/* ---------- 側欄（窄螢幕為抽屜） ---------- */
+(function () {
+  const open = v => { document.body.classList.toggle('sb-open', v); $('menuToggle').setAttribute('aria-expanded', String(v)); };
+  $('menuToggle').onclick = () => open(!document.body.classList.contains('sb-open'));
+  $('sbBackdrop').onclick = () => open(false);
+  $('sidebar').addEventListener('click', e => { if (e.target.closest('.sb-item')) open(false); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') open(false); });
+})();
+/* ---------- 篇目目錄表單：每個文字欄位也有 AI 框選按鈕（只用本機 OCR） ---------- */
+[['fTitle', 'title'], ['fColumn', 'column'], ['fAuthor', 'author'], ['fRole', 'role']].forEach(([id, key]) => {
+  const inp = $(id), row = h('div', 'fi-row' + (id === 'fTitle' ? ' fi-top' : ''));
+  inp.parentNode.insertBefore(row, inp);
+  row.append(aiPickBtn(key, inp, null, null, catalogCtx()), inp);
+});
+/* ---------- 篇目表單可收合（記住選擇） ---------- */
+(function () {
+  const form = $('entryForm'), btn = $('formToggle');
+  const set = (collapsed, save) => {
+    form.classList.toggle('collapsed', collapsed);
+    btn.setAttribute('aria-expanded', String(!collapsed));
+    btn.querySelector('span').textContent = collapsed ? '展開' : '收合';
+    btn.querySelector('svg').style.transform = collapsed ? 'rotate(180deg)' : '';
+    if (save) { try { localStorage.setItem('journal-form-collapsed', collapsed ? '1' : '0'); } catch (e) { /* 略過 */ } }
+  };
+  let saved = false; try { saved = localStorage.getItem('journal-form-collapsed') === '1'; } catch (e) { /* 略過 */ }
+  set(saved, false);
+  btn.onclick = () => set(!form.classList.contains('collapsed'), true);
+  window.expandEntryForm = () => set(false, false);
+})();
 updateKeyState();
 pvRender();

@@ -73,10 +73,12 @@ async function loadIssue(is) {
   is.entries = toTree(Array.isArray(flat) ? {} : flat);
   is.meta = { ...META_DEFAULT, ...parse(meta, {}) };
   is.saved = JSON.stringify(flatten(is.entries, 'start', {}));
+  sortEntries(is.entries, is.pages); // 載入後依影像順序排好（下次存檔時才會寫回）
   is.rec = parse(recs, {}); if (Array.isArray(is.rec)) is.rec = {};
   is.recSaved = JSON.stringify(is.rec);
   is.loaded = true;
 }
+let rootCollapsed = false;
 let selectedId = null, editingId = null, confirmDeleteId = null, flashId = null, customMode = false, pageTouched = false, dragId = null, pickedList = [], pickOrder = [];
 const issue = () => state.issues.find(i => i.id === state.issueId) || EMPTY;
 const curPage = () => issue().pages[state.pageIdx];
@@ -173,6 +175,7 @@ function renderPageSelect() {
   $('pageSelect').replaceChildren(...issue().pages.map((p, i) => new Option(p.label, i, false, i === state.pageIdx)));
 }
 function showPage(i) {
+  if (typeof cancelPick === 'function') cancelPick();
   const n = issue().pages.length;
   if (!n) {
     $('pageImg').removeAttribute('src'); $('pnoTag').textContent = ''; $('readout').textContent = '';
@@ -208,7 +211,9 @@ $('issueSelect').onchange = async e => {
   selectedId = null; confirmDeleteId = null;
   const is = issue();
   if (is.id && !is.loaded) {
+    $('app').classList.add('is-loading'); $('issueSelect').disabled = true;
     try { await loadIssue(is); } catch (err) { toast('讀取失敗：' + err.message); }
+    $('app').classList.remove('is-loading'); $('issueSelect').disabled = false;
   }
   resetForm(); renderAll();
 };
@@ -233,7 +238,15 @@ function updateSaveLabel() {
     $('saveBtn').textContent = `存到「${t.length > 10 ? t.slice(0, 9) + '…' : t}」`;
   } else $('saveBtn').textContent = '存檔';
 }
-function showError(msg) { $('formError').textContent = msg || ''; $('formError').hidden = !msg; }
+function showError(msg) {
+  $('formError').textContent = msg || ''; $('formError').hidden = !msg;
+  ['fTitle', 'fPage1', 'fPage2'].forEach(id => $(id).classList.remove('invalid'));
+  if (!msg) return;
+  if (/題名/.test(msg)) $('fTitle').classList.add('invalid');
+  if (/影像|範圍|起始|結束/.test(msg)) ['fPage1', 'fPage2'].forEach(id => $(id).classList.add('invalid'));
+}
+// 一開始輸入就清除錯誤標示（即時回饋）
+['fTitle', 'fPage1', 'fPage2'].forEach(id => $(id).addEventListener('input', () => { $(id).classList.remove('invalid'); if (!$('formError').hidden) $('formError').hidden = true; }));
 function resetForm() {
   editingId = null; pageTouched = false;
   ['fTitle', 'fColumn', 'fAuthor', 'fRole'].forEach(id => { $(id).value = ''; });
@@ -243,7 +256,7 @@ function resetForm() {
   const p = curPage();
   $('fPage1').value = $('fPage2').value = p ? p.label : '';
   updateSaveLabel();
-  $('editingTag').hidden = true;
+  $('editingTag').hidden = true; if ($('formSum')) $('formSum').textContent = '';
 }
 function loadForm(n) {
   editingId = n.id; pageTouched = true;
@@ -253,7 +266,7 @@ function loadForm(n) {
   pickedList = [...n.pageList];
   setCustom(n.pageList.length > 0); showError('');
   updateSaveLabel();
-  $('editingTag').hidden = false;
+  $('editingTag').hidden = false; if ($('formSum')) $('formSum').textContent = n.title;
   $('fTitle').focus();
 }
 function labelIndex(label) { return issue().pages.findIndex(p => p.label === label); }
@@ -291,7 +304,7 @@ $('entryForm').addEventListener('submit', e => {
     flashId = node.id; syncEntryToRec(node);
     toast(parent ? `已存到「${parent.node.title}」之下` : '已存檔');
   }
-  resetForm(); renderTree(); persist();
+  sortEntries(); resetForm(); renderTree(); persist();
 });
 $('resetBtn').onclick = resetForm;
 $('levelOn').addEventListener('change', updateSaveLabel);
@@ -347,6 +360,12 @@ function pagesText(n) {
   if (n.pageList.length) return n.pageList.join('、');
   return n.page1 === n.page2 ? n.page1 : `${n.page1}–${n.page2}`;
 }
+// 清單用的簡短影像範圍：去掉與資料編號相同的前綴，例如 0MHC0019320-01-0001 → 01-0001
+function shortLabel(l) { const id = issue().id + '-'; return l.startsWith(id) ? l.slice(id.length) : l; }
+function pagesShort(n) {
+  if (n.pageList.length) { const a = n.pageList.map(shortLabel); return a.length > 3 ? a.slice(0, 3).join('、') + '…（共 ' + a.length + ' 張）' : a.join('、'); }
+  return n.page1 === n.page2 ? shortLabel(n.page1) : `${shortLabel(n.page1)} ～ ${shortLabel(n.page2)}`;
+}
 function pnoText(n) {
   if (n.pageList.length) return '';
   const pno = l => { const p = issue().pages[labelIndex(l)]; return p ? p.pno : ''; };
@@ -359,9 +378,10 @@ function firstLabel(n) { return n.pageList[0] || n.page1; }
 function renderRow(n) {
   const li = make('li');
   const row = make('div', 'row');
-  row.dataset.id = n.id; row.draggable = true;
+  row.dataset.id = n.id;
   if (n.id === selectedId) row.classList.add('selected');
   if (n.id === flashId) row.classList.add('flash');
+  if (n.children.length) row.classList.add('has-kids');
 
   const tg = make('button', 'toggle' + (n.children.length ? '' : ' none'), n.collapsed ? '▶' : '▼');
   tg.type = 'button';
@@ -376,11 +396,12 @@ function renderRow(n) {
   t.append(n.title);
   main.append(t);
   const sub = make('div', 'row-sub');
-  sub.append(make('span', 'row-pages', '影像 ' + pagesText(n)));
+  sub.append(make('span', 'row-pages', pagesShort(n)));
   const extra = [pnoText(n), n.column && '專欄：' + n.column, n.author && n.author + (n.role ? `（${n.role}）` : '')].filter(Boolean).join('・');
   if (extra) sub.append('・' + extra);
   main.append(sub);
   row.append(main);
+  if (n.children.length) row.append(make('span', 'kid-count', `${n.children.length} 筆子項`));
 
   const act = make('div', 'row-actions');
   if (confirmDeleteId === n.id) {
@@ -405,6 +426,7 @@ function renderRow(n) {
     );
   }
   row.append(act);
+  row.title = n.title + '\n影像 ' + pagesText(n);
   row.onclick = () => { const i = labelIndex(firstLabel(n)); if (i >= 0) showPage(i); else toast('這一期找不到這張影像'); selectedId = n.id; loadForm(n); renderTree(); };
   li.append(row);
 
@@ -420,77 +442,61 @@ function renderTree() {
   box.replaceChildren();
   if (roots.length) {
     const ul = make('ul', 'tree');
+    if (roots.some(function f(n) { return n.children.length > 0; })) ul.classList.add('has-hier');
     roots.forEach(n => ul.append(renderRow(n)));
-    box.append(ul);
+    // 最上層（只在畫面顯示，不存進篇目資料）：雜誌編目裡的「刊名」，所有篇目都歸在它底下
+    const bookName = ((issue().meta || {})['刊名'] || '').trim();
+    if (bookName) {
+      let cnt = 0; walk(() => cnt++);
+      const head = make('div', 'root-head' + (rootCollapsed ? ' collapsed' : ''));
+      head.setAttribute('role', 'button'); head.tabIndex = 0;
+      head.setAttribute('aria-expanded', String(!rootCollapsed));
+      head.title = '最上層：雜誌編目的刊名（只用來顯示，不會存進篇目資料）。點一下可收合全部篇目。';
+      head.append(make('span', 'root-arrow', rootCollapsed ? '▶' : '▼'), make('span', 'root-name', bookName), make('span', 'kid-count', cnt + ' 筆'));
+      const flip = () => { rootCollapsed = !rootCollapsed; renderTree(); };
+      head.onclick = flip; head.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(); } };
+      ul.classList.add('under-root'); ul.hidden = rootCollapsed;
+      box.append(head, ul);
+    } else box.append(ul);
   } else {
     box.append(make('div', 'empty', '這一期還沒有篇目。在上方填入題名和頁碼後按「存檔」，就會出現在這裡。'));
   }
   box.scrollTop = top;
   let count = 0; walk(() => count++);
   $('treeCount').textContent = `共 ${count} 筆`;
+  // 展開／收合只對「有子層級」的篇目有作用；沒有子層級時停用並說明原因，避免按了沒反應
+  const hasKids = (function f(l) { return l.some(n => n.children.length || f(n.children)); })(issue().entries);
+  ['expandAll', 'collapseAll'].forEach(id => {
+    $(id).disabled = !hasKids;
+    $(id).title = hasKids ? '' : '目前沒有子層級，沒有可展開或收合的項目。（選一筆後按「降一層」可建立子層級）';
+  });
   const loc = selectedId ? locate(selectedId) : null;
-  $('moveUp').disabled = !loc || loc.index === 0;
-  $('moveDown').disabled = !loc || loc.index === loc.list.length - 1;
   $('outdent').disabled = !loc || !loc.parent;
   $('indent').disabled = !loc || loc.index === 0;
   updateSaveLabel();
   flashId = null;
 }
-function swap(d) {
-  const l = locate(selectedId); if (!l) return;
-  const [n] = l.list.splice(l.index, 1); l.list.splice(l.index + d, 0, n);
-  flashId = n.id; renderTree(); persist();
+// 篇目依「起始影像」的順序自動排列（同一層之內）；找不到對應影像的排在最後，彼此維持原順序
+function sortEntries(list, pages) {
+  list = list || issue().entries; pages = pages || issue().pages;
+  const key = n => { const l = n.pageList[0] || n.page1; const i = pages.findIndex(p => p.label === l); return i < 0 ? Number.MAX_SAFE_INTEGER : i; };
+  list.sort((a, b) => key(a) - key(b));
+  list.forEach(n => sortEntries(n.children, pages));
 }
-$('moveUp').onclick = () => swap(-1);
-$('moveDown').onclick = () => swap(1);
 $('outdent').onclick = () => {
   const l = locate(selectedId); if (!l || !l.parent) return;
   const p = locate(l.parent.id);
   l.list.splice(l.index, 1); p.list.splice(p.index + 1, 0, l.node);
-  flashId = l.node.id; renderTree(); persist();
+  sortEntries(); flashId = l.node.id; renderTree(); persist();
 };
 $('indent').onclick = () => {
   const l = locate(selectedId); if (!l || l.index === 0) return;
   const prev = l.list[l.index - 1];
   l.list.splice(l.index, 1); prev.children.push(l.node); prev.collapsed = false;
-  flashId = l.node.id; renderTree(); persist();
+  sortEntries(); flashId = l.node.id; renderTree(); persist();
 };
 $('expandAll').onclick = () => { walk(n => { n.collapsed = false; }); renderTree(); persist(); };
 $('collapseAll').onclick = () => { walk(n => { n.collapsed = n.children.length > 0; }); renderTree(); persist(); };
-
-/* 拖曳：滑到列的上緣、下緣放在前後，中段放成子層 */
-function clearDrop() { document.querySelectorAll('.row.drop-before,.row.drop-after,.row.drop-inside').forEach(r => r.classList.remove('drop-before', 'drop-after', 'drop-inside')); }
-function dropZone(row, e) {
-  const b = row.getBoundingClientRect(), y = (e.clientY - b.top) / b.height;
-  return y < .28 ? 'before' : y > .72 ? 'after' : 'inside';
-}
-const scrollBox = $('treeScroll');
-scrollBox.addEventListener('dragstart', e => {
-  const row = e.target.closest && e.target.closest('.row'); if (!row) return;
-  dragId = row.dataset.id; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragId);
-  row.classList.add('is-dragging');
-});
-scrollBox.addEventListener('dragover', e => {
-  const row = e.target.closest('.row'); if (!row || !dragId) return;
-  const src = locate(dragId);
-  if (!src || contains(src.node, row.dataset.id)) { clearDrop(); return; }
-  e.preventDefault(); clearDrop();
-  row.classList.add('drop-' + dropZone(row, e));
-});
-scrollBox.addEventListener('drop', e => {
-  const row = e.target.closest('.row'); if (!row || !dragId) return;
-  e.preventDefault();
-  const zone = dropZone(row, e), src = locate(dragId), targetId = row.dataset.id;
-  if (src && !contains(src.node, targetId)) {
-    src.list.splice(src.index, 1);
-    const t = locate(targetId);
-    if (zone === 'inside') { t.node.children.push(src.node); t.node.collapsed = false; }
-    else t.list.splice(t.index + (zone === 'after' ? 1 : 0), 0, src.node);
-    flashId = src.node.id; persist();
-  }
-  dragId = null; renderTree();
-});
-scrollBox.addEventListener('dragend', () => { dragId = null; clearDrop(); document.querySelectorAll('.is-dragging').forEach(r => r.classList.remove('is-dragging')); });
 
 /* ---------- 雜誌編目 ---------- */
 document.querySelectorAll('[data-close]').forEach(b => { b.onclick = () => b.closest('dialog').close(); });
@@ -526,7 +532,7 @@ $('metaSave').onclick = () => {
   const is = issue(), meta = { ...is.meta };
   $('metaBody').querySelectorAll('[data-key]').forEach(c => { meta[c.dataset.key] = c.value.trim(); });
   api('saveMeta.php', { book: is.id, meta: JSON.stringify(meta) })
-    .then(() => { is.meta = meta; $('metaDlg').close(); toast('已存檔雜誌編目'); })
+    .then(() => { is.meta = meta; $('metaDlg').close(); toast('已存檔雜誌編目'); renderTree(); })
     .catch(e => toast('存檔失敗：' + e.message));
 };
 
@@ -592,15 +598,23 @@ renderAll();
 })();
 
 /* ---------- AI 辨識（呼叫 analyze.php，結果只是草稿，要人工確認才會存） ---------- */
-async function callAnalyze(mode, btn) {
+// 注意：pages.js 也有一個 callAnalyze（逐頁核對用），同名函式會被後載入的蓋掉，所以這裡叫 analyzeCurrent
+async function analyzeCurrent(mode, btn) {
   const is = issue(), p = curPage();
-  if (!is.id || !p) { toast('請先選擇期刊與影像'); return null; }
+  if (!is.id || !p) { toast('請先選擇資料與影像'); return null; }
+  const eng = await askEngine();   // 先問：API（Gemini）或本機 OCR
+  if (!eng) return null;
   const label = btn.textContent;
   document.querySelectorAll('#aiPage,#aiToc').forEach(b => { b.disabled = true; });
-  btn.textContent = '辨識中…';
-  try { return parse(await api('analyze.php', { book: is.id, page: p.label, mode }), null); }
-  catch (e) { toast(e.message); return null; }
-  finally { btn.textContent = label; document.querySelectorAll('#aiPage,#aiToc').forEach(b => { b.disabled = false; }); }
+  btn.textContent = '辨識中…'; btn.classList.add('loading');
+  toast(eng === 'local' ? '本機 OCR 辨識中，請稍候…' : 'AI 辨識中，請稍候…');
+  try {
+    const params = { book: is.id, page: p.label, mode };
+    if (eng === 'local') { params.engine = 'local'; if (isThread(is)) params.thread = '1'; }
+    return parse(await api('analyze.php', params), null);
+  }
+  catch (e) { toast('辨識失敗：' + e.message); return null; }
+  finally { btn.textContent = label; btn.classList.remove('loading'); document.querySelectorAll('#aiPage,#aiToc').forEach(b => { b.disabled = false; }); }
 }
 
 function fillFromArticle(a) {
@@ -610,7 +624,7 @@ function fillFromArticle(a) {
 }
 $('aiPage').onclick = async () => {
   const box = $('candBox'); box.hidden = true; box.replaceChildren();
-  const r = await callAnalyze('page', $('aiPage'));
+  const r = await analyzeCurrent('page', $('aiPage'));
   if (!r) return;
   const list = (r.articles || []).filter(a => a.title);
   if (!list.length) { toast('這一頁沒有辨識到篇目標題'); return; }
@@ -675,7 +689,7 @@ function drawTocRows() {
 function countToc() { $('tocCount').textContent = `已勾選 ${tocDraft.filter(d => d.on).length} / ${tocDraft.length} 筆`; }
 
 $('aiToc').onclick = async () => {
-  const r = await callAnalyze('toc', $('aiToc'));
+  const r = await analyzeCurrent('toc', $('aiToc'));
   if (!r) return;
   const list = (r.entries || []).filter(e => e.title);
   if (!list.length) { toast('這一頁沒有辨識到目錄內容'); return; }
@@ -705,6 +719,6 @@ $('tocAdd').onclick = () => {
     else { issue().entries.push(node); parent = node; }
     added++;
   });
-  $('tocDlg').close(); renderTree(); persist();
+  sortEntries(); $('tocDlg').close(); renderTree(); persist();
   toast(`已加入 ${added} 筆篇目，請再逐筆核對`);
 };

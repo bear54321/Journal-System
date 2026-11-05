@@ -140,3 +140,41 @@ def analyze(items, W, H, thread=False):
         return {"articles": [{"title": big["text"].replace(" ", ""), "column_name": "", "author": "", "author_role": "", "is_ad": False}], "printed_page": printed}
 
     return {"articles": [], "printed_page": printed}
+
+
+def toc(items, W, H, thread=False):
+    """目錄頁 → entries：[{title, page, level}]。規則：依閱讀順序逐行；行尾的數字（含「……」「　」分隔）視為頁碼；縮排較深的行視為第二層。"""
+    items = [i for i in items if i["score"] >= 0.5 and i["text"].strip() and not NOISE.match(i["text"].strip())]
+    if not items:
+        return {"entries": []}
+    vertical = sum(1 for i in items if i["h"] > i["w"] * 1.2) > len(items) / 2
+    spread = W > H * 1.1
+    if thread and spread:  # 版心不是目錄內容
+        items = [i for i in items if abs(i["x"] + i["w"] / 2 - W / 2) >= 0.05 * W]
+    if vertical:
+        items.sort(key=lambda i: (-(i["x"] + i["w"] / 2)))
+        along = lambda i: i["y"]; thick = lambda i: i["w"]
+    else:
+        items.sort(key=lambda i: (round((i["y"] + i["h"] / 2) / max(8.0, i["h"] * 0.6)), i["x"]))
+        along = lambda i: i["x"]; thick = lambda i: i["h"]
+    base = sorted(along(i) for i in items)[len(items) // 4]  # 以第 25 百分位當基準，避免頁首零星小字把整頁都判成縮排
+    med_t = sorted(thick(i) for i in items)[len(items) // 2]
+    lead = r"[\s.．。·‧…‥・\-_—~～]"
+    pat_ar = re.compile(r"^(.{2,}?)%s*?(\d{1,4})$" % lead)
+    pat_cn = re.compile(r"^(.{2,}?)%s+([%s]{1,4})$" % (lead, CN))
+    out = []
+    for i in items:
+        t = i["text"].replace(" ", "").strip()
+        if len(t) < 2 or re.fullmatch(r"[0-9〇一二三四五六七八九十]+", t) or (len(t) <= 14 and re.search(r"(總目|目錄|目次)$", t)):
+            continue
+        page = ""
+        m = pat_cn.match(t)
+        if m:
+            t, page = m.group(1), _to_arabic(m.group(2))
+        else:
+            m = pat_ar.match(t)
+            if m and re.search(r"[.．。·‧…‥・\s]\d", i["text"]) or (m and not HEAD.match(t) and len(m.group(2)) >= 1 and re.search(r"[^\d第]\d{1,4}$", t)):
+                t, page = m.group(1).rstrip(".．。·‧…‥・ -_—~～"), str(int(m.group(2)))
+        level = 1 if (along(i) - base) > 1.2 * max(1.0, med_t) else 0
+        out.append({"title": _fix_head(t), "page": page, "level": level})
+    return {"entries": out[:200]}

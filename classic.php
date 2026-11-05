@@ -16,24 +16,27 @@ natcasesort($books);
 <html lang="zh-Hant">
 <head>
   <meta charset="UTF-8">
-  <title>期刊-線上編目系統</title>
+  <title>舊版介面｜郭廷以圖書館數位化資料編目工作臺</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.13.2/themes/base/jquery-ui.min.css">
-  <link rel="stylesheet" href="base.css?v=1">
+  <link rel="stylesheet" href="ui.css?v=25">
+  <link rel="stylesheet" href="base.css?v=2">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.13.2/jquery-ui.min.js"></script>
   <script src="base.js?v=1"></script>
 </head>
 <body>
   <div class="topbar">
-    期刊-線上編目系統
+    <span>郭廷以圖書館數位化資料編目工作臺</span><span class="badge-classic">舊版介面</span>
     <select id="bookSelect">
-      <option value="">選擇期刊</option>
+      <option value="">選擇資料</option>
       <?php foreach ($books as $b): ?>
         <option value="<?= htmlspecialchars($b, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($b, ENT_QUOTES, 'UTF-8') ?></option>
       <?php endforeach; ?>
     </select>
     <a id="page_work" target="_blank"></a>
     <select id="pageSelect" hidden></select>
+    <a class="back" href="index.php">‹ 回新版介面</a>
   </div>
 
   <div class="main">

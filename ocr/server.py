@@ -108,6 +108,19 @@ def analyze_bytes(data, thread):
     return analyze_local.analyze(items, w, h, thread)
 
 
+def toc_bytes(data, thread):
+    """目錄頁：把每一行目錄文字轉成「題名＋頁碼＋層級」（粗略，需人工核對）。"""
+    img = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if img is None:
+        raise ValueError("無法解讀圖片")
+    h, w = img.shape[:2]
+    k = min(1.0, 3200.0 / max(h, w))
+    if k < 1.0:
+        img = cv2.resize(img, (int(w * k), int(h * k)), interpolation=cv2.INTER_AREA)
+        h, w = img.shape[:2]
+    return analyze_local.toc(run_engine(img), w, h, thread)
+
+
 class Handler(BaseHTTPRequestHandler):
     def _send(self, code, body, ctype="application/json; charset=utf-8"):
         raw = body if isinstance(body, bytes) else body.encode("utf-8")
@@ -124,14 +137,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         u = urlparse(self.path)
-        if u.path not in ("/ocr", "/analyze"):
+        if u.path not in ("/ocr", "/analyze", "/toc"):
             return self._send(404, json.dumps({"error": "not found"}))
         try:
             n = int(self.headers.get("Content-Length", "0"))
             if n <= 0 or n > 40 * 1024 * 1024:
                 raise ValueError("圖片大小不正確")
             data = self.rfile.read(n)
-            if u.path == "/analyze":
+            if u.path == "/toc":
+                thread = parse_qs(u.query).get("thread", ["0"])[0] == "1"
+                self._send(200, json.dumps(toc_bytes(data, thread), ensure_ascii=False))
+            elif u.path == "/analyze":
                 thread = parse_qs(u.query).get("thread", ["0"])[0] == "1"
                 self._send(200, json.dumps(analyze_bytes(data, thread), ensure_ascii=False))
             else:

@@ -29,11 +29,12 @@ if (($_POST['mode'] ?? '') === 'ocr') { // 框選辨識一律走本機 OCR
 }
 
 // 整頁分析（本機 OCR）：mode=page / batch + engine=local。用 ocr/server.py 的規則式分析，不需要 Gemini 金鑰
-if (($_POST['engine'] ?? '') === 'local' && in_array($_POST['mode'] ?? 'page', ['page', 'batch'], true)) {
+if (($_POST['engine'] ?? '') === 'local' && in_array($_POST['mode'] ?? 'page', ['page', 'batch', 'toc'], true)) {
   if (!function_exists('curl_init')) out('PHP 沒有啟用 curl 擴充', 500);
   $lbook = get_book();
   $limgs = list_images($lbook);
-  $lmode = ($_POST['mode'] ?? 'page') === 'batch' ? 'batch' : 'page';
+  $lmode = in_array($_POST['mode'] ?? 'page', ['batch', 'toc'], true) ? $_POST['mode'] : 'page';
+  $lpath = $lmode === 'toc' ? '/toc' : '/analyze';
   $llabels = $lmode === 'batch' ? json_decode((string)($_POST['pages'] ?? ''), true) : [(string)($_POST['page'] ?? '')];
   if (!is_array($llabels) || !$llabels || count($llabels) > 8) out('pages 需為 1–8 張影像編號', 400);
   $lthread = (($_POST['thread'] ?? '') === '1') ? '1' : '0';
@@ -45,7 +46,7 @@ if (($_POST['engine'] ?? '') === 'local' && in_array($_POST['mode'] ?? 'page', [
     if ($bytes === false || $bytes === '') out('讀不到影像：' . $l, 500);
     $resp = false; $code = 0;
     for ($try = 0; $try < 5; $try++) { // 服務剛啟動時模型還在載入：連不上就等一下再試
-      $ch = curl_init(OCR_LOCAL_URL . '/analyze?thread=' . $lthread);
+      $ch = curl_init(OCR_LOCAL_URL . $lpath . '?thread=' . $lthread);
       curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => $bytes, CURLOPT_HTTPHEADER => ['Content-Type: application/octet-stream'], CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 3, CURLOPT_TIMEOUT => 180]);
       $resp = curl_exec($ch); $code = curl_getinfo($ch, CURLINFO_RESPONSE_CODE); curl_close($ch);
       if ($resp !== false && $code !== 0) break;
@@ -54,6 +55,11 @@ if (($_POST['engine'] ?? '') === 'local' && in_array($_POST['mode'] ?? 'page', [
     if ($resp === false || $code === 0) out('本機 OCR 服務沒有啟動：請用 start.bat 啟動系統，或雙擊 ocr 資料夾裡的「start-ocr.bat」。', 502);
     $j = json_decode($resp, true);
     if ($code !== 200 || !is_array($j)) out('本機 OCR 失敗：' . mb_substr((string)($j['error'] ?? $resp), 0, 200), 502);
+    if ($lmode === 'toc') {
+      $ents = [];
+      foreach (($j['entries'] ?? []) as $e) $ents[] = ['title' => (string)($e['title'] ?? ''), 'column_name' => '', 'author' => '', 'author_role' => '', 'is_ad' => false, 'page' => (string)($e['page'] ?? ''), 'level' => (int)($e['level'] ?? 0)];
+      out_json(['entries' => $ents, 'model' => '本機 OCR']);
+    }
     $arts = [];
     foreach (($j['articles'] ?? []) as $a) {
       $arts[] = ['title' => (string)($a['title'] ?? ''), 'column_name' => (string)($a['column_name'] ?? ''), 'author' => (string)($a['author'] ?? ''), 'author_role' => (string)($a['author_role'] ?? ''), 'is_ad' => false, 'uncertain' => []];
