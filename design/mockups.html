@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>編目工作台 版面草稿</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@600;700&display=swap">
+<style>
+:root {
+  --paper: #f4f1ea; --surface: #fdfcf9; --sunken: #ebe7dd; --ink: #1d2b2f; --muted: #5f6d70; --line: #d8d2c4;
+  --accent: #1b5b66; --accent-soft: #d7e7e9; --accent-ink: #ffffff;
+  --ok: #2f7d4f; --ok-soft: #dcefe2; --warn: #9a6200; --warn-soft: #fbebc8; --bad: #a43a2f; --bad-soft: #f7dcd8; --inh: #6d7679; --inh-soft: #e4e6e4;
+  --stage: #20282b;
+  --serif: "Noto Serif TC", "PMingLiU", serif; --sans: "Noto Sans TC", "Microsoft JhengHei", sans-serif; --mono: "IBM Plex Mono", Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--paper); color: var(--ink); font: 14px/1.5 var(--sans); }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.app { height: 100%; display: flex; flex-direction: column; }
+.topbar { display: flex; align-items: center; gap: 14px; padding: 8px 18px; background: var(--surface); border-bottom: 1px solid var(--line); flex: none; }
+.brand { font: 700 18px var(--serif); letter-spacing: .04em; margin: 0; }
+.crumb { color: var(--muted); font-size: 13px; }
+.sp { flex: 1; }
+.btn { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; cursor: pointer; white-space: nowrap; }
+.btn:hover { background: var(--accent-soft); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 500; }
+.btn.primary:hover { filter: brightness(1.12); }
+.btn.ghost { border-color: transparent; background: transparent; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--sunken); }
+.seg button { border: 0; background: transparent; padding: 5px 14px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 500; }
+
+.banner { display: flex; align-items: center; gap: 12px; padding: 6px 18px; background: var(--accent-soft); border-bottom: 1px solid var(--line); flex: none; font-size: 13px; }
+.banner b { font-weight: 700; }
+.progress { display: flex; height: 8px; width: 220px; border-radius: 4px; overflow: hidden; background: var(--sunken); }
+.progress i { display: block; height: 100%; }
+.legend { display: flex; gap: 12px; color: var(--muted); font-size: 12px; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+
+.badge { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 10px; font-size: 12px; white-space: nowrap; }
+.b-ok { background: var(--ok-soft); color: var(--ok); } .b-review { background: var(--warn-soft); color: var(--warn); }
+.b-inh { background: var(--inh-soft); color: var(--inh); } .b-bad { background: var(--bad-soft); color: var(--bad); }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.code { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.code b { color: var(--ink); font-weight: 500; }
+
+.stage { flex: 1; min-height: 0; }
+.view { display: none; height: 100%; }
+.view.on { display: grid; }
+
+.viewer { position: relative; background: var(--stage); overflow: hidden; display: flex; align-items: center; justify-content: center; min-height: 0; }
+.viewer img { max-width: 100%; max-height: 100%; object-fit: contain; box-shadow: 0 6px 28px rgba(0,0,0,.5); }
+.viewer .tag { position: absolute; left: 12px; top: 10px; background: rgba(0,0,0,.55); color: #fff; border-radius: 6px; padding: 2px 10px; font-size: 12px; }
+.viewer .zoom { position: absolute; right: 12px; bottom: 10px; display: flex; gap: 4px; }
+.viewer .zoom button { background: rgba(255,255,255,.14); color: #fff; border: 0; border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+
+.field { display: flex; flex-direction: column; gap: 3px; }
+.field > label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.field input[type=text], .field textarea, .field select { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; width: 100%; }
+.field textarea { resize: vertical; font: 500 16px/1.4 var(--serif); }
+.field.ai input, .field.ai textarea { border-color: #d6b24a; background: #fffaf0; }
+.ai-note { font-size: 11px; color: var(--warn); background: var(--warn-soft); padding: 0 6px; border-radius: 4px; }
+.inherit-box { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 8px; background: var(--sunken); font-size: 13px; }
+
+/* ---- 草稿 1：核對卡 ---- */
+#v1 { grid-template-columns: minmax(0, 1fr) 460px; grid-template-rows: minmax(0, 1fr) 84px; }
+#v1 .viewer { grid-row: 1; }
+#v1 .card { grid-row: 1; background: var(--surface); border-left: 1px solid var(--line); padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; overflow: auto; }
+#v1 .card h2 { font: 700 20px var(--serif); margin: 0; }
+#v1 .card .head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+#v1 .acts { display: flex; gap: 8px; margin-top: auto; padding-top: 6px; }
+#v1 .acts .btn { flex: 1; padding: 9px 10px; }
+#v1 .acts .primary { flex: 2; }
+kbd { font: 11px var(--mono); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--surface); color: var(--muted); }
+.primary kbd { background: rgba(255,255,255,.2); border-color: rgba(255,255,255,.4); color: #fff; }
+.strip { grid-column: 1 / -1; grid-row: 2; background: var(--sunken); border-top: 1px solid var(--line); padding: 10px 14px; display: flex; gap: 6px; overflow-x: auto; align-items: stretch; }
+.thumb { flex: none; width: 52px; border: 2px solid transparent; border-radius: 6px; background: var(--surface); cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: 4px 0 3px; font-size: 11px; position: relative; }
+.thumb .n { font: 500 14px var(--mono); }
+.thumb .bar { width: 36px; height: 5px; border-radius: 3px; }
+.thumb.sel { border-color: var(--accent); box-shadow: 0 2px 8px rgba(27,91,102,.35); }
+.thumb.inh .n { color: var(--inh); }
+.s-ok { background: var(--ok); } .s-review { background: #d29a1c; } .s-inh { background: #a9b0b2; } .s-bad { background: var(--bad); }
+
+/* ---- 草稿 2：清單 + 影像 ---- */
+#v2 { grid-template-columns: 600px minmax(0, 1fr); }
+#v2 .list { background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+.filters { display: flex; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.chip { border: 1px solid var(--line); border-radius: 14px; padding: 2px 12px; background: var(--surface); cursor: pointer; font-size: 13px; }
+.chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.rows { overflow: auto; flex: 1; }
+.row { display: grid; grid-template-columns: 52px minmax(0, 1fr) 84px; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); cursor: pointer; border-left: 4px solid transparent; }
+.row:hover { background: var(--paper); }
+.row.sel { background: var(--accent-soft); border-left-color: var(--accent); }
+.row .pg { font: 500 13px var(--mono); }
+.row .pg small { display: block; color: var(--muted); font-size: 10px; }
+.row .tt { font: 600 15px var(--serif); overflow-wrap: anywhere; }
+.row .tt.inh { color: var(--inh); font-weight: 400; }
+.row .sub { color: var(--muted); font-size: 12px; }
+.row .edit { grid-column: 2 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
+.row .edit .full { grid-column: 1 / -1; }
+
+/* ---- 草稿 3：試算表 ---- */
+#v3 { grid-template-columns: minmax(0, 1fr) 400px; }
+#v3 .sheet { overflow: auto; background: var(--surface); min-height: 0; }
+table.sheet-t { border-collapse: separate; border-spacing: 0; width: 100%; }
+.sheet-t th { position: sticky; top: 0; background: var(--sunken); text-align: left; font-weight: 500; font-size: 12px; color: var(--muted); padding: 7px 8px; border-bottom: 1px solid var(--line); z-index: 2; }
+.sheet-t td { padding: 3px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.sheet-t tr.sel td { background: var(--accent-soft); }
+.sheet-t tr:hover td { background: var(--paper); }
+.sheet-t tr.sel:hover td { background: var(--accent-soft); }
+.sheet-t td.range { width: 14px; padding: 0 0 0 6px; }
+.sheet-t td.range i { display: block; width: 4px; margin: 0 auto; background: var(--accent); opacity: .55; height: 100%; min-height: 30px; }
+.sheet-t td.range i.first { border-radius: 3px 3px 0 0; margin-top: 8px; min-height: 22px; } .sheet-t td.range i.last { border-radius: 0 0 3px 3px; margin-bottom: 8px; min-height: 22px; }
+.sheet-t td.range i.solo { border-radius: 3px; margin: 8px auto; min-height: 14px; }
+.cell { width: 100%; border: 1px solid transparent; background: transparent; border-radius: 4px; padding: 4px 6px; }
+.cell:hover { border-color: var(--line); } .cell:focus { border-color: var(--accent); background: var(--surface); }
+.cell.t { font: 600 14px var(--serif); } .cell.inh { color: var(--inh); font-weight: 400; font-style: italic; }
+.cell.ai { background: #fffaf0; border-color: #ecd9a0; }
+#v3 aside { background: var(--stage); display: flex; flex-direction: column; min-height: 0; }
+#v3 aside .viewer { flex: 1; }
+#v3 aside .meta { background: var(--surface); padding: 10px 14px; border-top: 1px solid var(--line); font-size: 13px; }
+.bulk { position: sticky; bottom: 0; display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--ink); color: #fff; }
+.bulk .btn { background: rgba(255,255,255,.12); border-color: transparent; color: #fff; }
+
+.note { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 6px 16px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 9; }
+.note.on { opacity: .95; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <h1 class="brand">期刊編目工作台</h1>
+    <span class="crumb">軍中文藝月刊 no.01・23 頁</span>
+    <button class="btn primary" id="batch">分析整期 (23 頁)</button>
+    <span class="sp"></span>
+    <span class="crumb">版面草稿：</span>
+    <div class="seg" role="group" aria-label="切換版面草稿">
+      <button type="button" data-v="1" aria-pressed="true">① 核對卡</button>
+      <button type="button" data-v="2" aria-pressed="false">② 清單＋影像</button>
+      <button type="button" data-v="3" aria-pressed="false">③ 試算表</button>
+    </div>
+    <button class="btn">雜誌編目</button>
+    <button class="btn">匯出</button>
+  </header>
+
+  <div class="banner">
+    <b>整期分析完成</b>
+    <div class="progress" id="prog" title="核對進度"></div>
+    <span id="progText"></span>
+    <span class="legend">
+      <span><i class="dot s-ok"></i>已確認</span><span><i class="dot s-review"></i>待檢查</span><span><i class="dot s-inh"></i>沿用前頁</span><span><i class="dot s-bad"></i>缺題名</span>
+    </span>
+    <span class="sp"></span>
+    <span class="crumb">示意資料：題名與作者僅為排版示範，不是真實辨識結果</span>
+  </div>
+
+  <main class="stage">
+    <!-- 草稿 1 -->
+    <section class="view on" id="v1">
+      <div class="viewer" id="v1viewer"></div>
+      <div class="card" id="v1card"></div>
+      <div class="strip" id="v1strip"></div>
+    </section>
+    <!-- 草稿 2 -->
+    <section class="view" id="v2">
+      <div class="list">
+        <div class="filters" id="v2filters"></div>
+        <div class="rows" id="v2rows"></div>
+      </div>
+      <div class="viewer" id="v2viewer"></div>
+    </section>
+    <!-- 草稿 3 -->
+    <section class="view" id="v3">
+      <div class="sheet" id="v3sheet"></div>
+      <aside><div class="viewer" id="v3viewer"></div><div class="meta" id="v3meta"></div></aside>
+    </section>
+  </main>
+</div>
+<div class="note" id="note"></div>
+
+<script>
+const BOOK = '軍中文藝月刊 no.01', PREFIX = '30550140108554-00000-00001-000', FIRST = 22, N = 23;
+const $ = id => document.getElementById(id);
+const el = (t, c, h) => { const e = document.createElement(t); if (c) e.className = c; if (h != null) e.innerHTML = h; return e; };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+/* 示意資料：own=true 代表 AI 在這頁找到了標題；false 代表沒找到，沿用前面最近的標題 */
+const SAMPLE = {
+  1: { own: false },
+  2: { own: true, title: '小黑子', author: '虹西方', col: '', st: 'ok' },
+  3: { own: true, title: '海之歌', author: '劉心皇', col: '', st: 'review', conf: ['author'] },
+  6: { own: true, title: '（示意）戰地書簡', author: '示意作者甲', col: '通訊', st: 'review', conf: ['title'] },
+  8: { own: true, title: '（示意）詩二首', author: '示意作者乙', col: '詩', st: 'ok' },
+  10: { own: true, title: '（示意）長篇連載 第三章', author: '示意作者丙', col: '連載', st: 'ok' },
+  13: { own: true, title: '（示意）讀者來函', author: '', col: '', st: 'review', conf: ['title', 'author'] },
+  15: { own: true, title: '（示意）本期徵稿啟事', author: '', col: '', st: 'ok', ad: true },
+  17: { own: true, title: '（示意）劇本選', author: '示意作者丁', col: '戲劇', st: 'review', conf: ['title'] },
+  21: { own: true, title: '', author: '', col: '', st: 'bad' }
+};
+const pages = [];
+for (let i = 1; i <= N; i++) {
+  const code = PREFIX + String(FIRST + i - 1).padStart(2, '0');
+  const s = SAMPLE[i] || { own: false };
+  pages.push({ n: i, code, tail: '1-000' + String(FIRST + i - 1).padStart(2, '0'), own: !!s.own, title: s.title || '', author: s.author || '', col: s.col || '', ad: !!s.ad, st: s.st || 'inh', conf: s.conf || [], confirmed: s.st === 'ok' });
+}
+// 沿用前頁：沒有題名的頁，繼承前面最近一個有題名的頁
+function resolved(i) {
+  for (let k = i; k >= 0; k--) if (pages[k].own && pages[k].title) return pages[k];
+  return null;
+}
+const stOf = p => p.own ? (p.title ? (p.confirmed ? 'ok' : 'review') : 'bad') : 'inh';
+const stLabel = { ok: '已確認', review: '待檢查', inh: '沿用前頁', bad: '缺題名' };
+const img = p => `/giveimg.php?b=${encodeURIComponent(BOOK)}&p=${encodeURIComponent(p.code)}`;
+let sel = 2, filter = 'all', v = 1;
+
+function say(msg) { const n = $('note'); n.textContent = msg; n.classList.add('on'); clearTimeout(say.t); say.t = setTimeout(() => n.classList.remove('on'), 1800); }
+function progress() {
+  const c = { ok: 0, review: 0, inh: 0, bad: 0 };
+  pages.forEach(p => c[stOf(p)]++);
+  $('prog').innerHTML = ['ok', 'review', 'inh', 'bad'].map(k => `<i class="s-${k}" style="width:${c[k] / N * 100}%"></i>`).join('');
+  $('progText').textContent = `已確認 ${c.ok}／待檢查 ${c.review}／沿用 ${c.inh}／缺題名 ${c.bad}`;
+}
+function viewer(box, p) {
+  box.innerHTML = '';
+  const im = el('img'); im.src = img(p); im.alt = '第 ' + p.n + ' 頁';
+  box.append(im, el('span', 'tag', `第 ${p.n} 頁・<span class="mono">…${p.tail}</span>`));
+  const z = el('div', 'zoom', '<button>−</button><button>符合視窗</button><button>＋</button>'); box.append(z);
+}
+function go(i) { sel = Math.max(0, Math.min(N - 1, i)); render(); }
+function confirmPage(p) { p.confirmed = true; if (p.own && !p.title) p.confirmed = false; }
+
+/* ---------- 草稿 1 ---------- */
+function render1() {
+  const p = pages[sel], r = resolved(sel), st = stOf(p);
+  viewer($('v1viewer'), p);
+  const card = $('v1card'); card.innerHTML = '';
+  card.append(el('div', 'head', `<h2>第 ${p.n} 頁</h2><span class="code">影像 <b>${p.code.slice(0, -5)}</b><b>${p.code.slice(-5)}</b></span><span class="badge b-${st}">${stLabel[st]}</span>`));
+  if (!p.own) {
+    card.append(el('div', 'inherit-box', `↳ 這一頁沒有辨識到新標題，沿用前頁：<b>${r ? esc(r.title) : '（前面也沒有標題，請補上）'}</b>`));
+    const b = el('button', 'btn', '這一頁其實有新標題…'); b.onclick = () => { p.own = true; p.title = ''; p.confirmed = false; render(); };
+    card.append(b);
+  } else {
+    const ai = k => p.conf.includes(k);
+    const f = (label, key, tag) => `<div class="field ${ai(key) ? 'ai' : ''}"><label>${label}${ai(key) ? '<span class="ai-note">AI 不確定</span>' : ''}</label>${tag}</div>`;
+    card.append(el('div', '', f('主要題名', 'title', `<textarea rows="2">${esc(p.title)}</textarea>`)));
+    card.append(el('div', '', f('作者', 'author', `<input type="text" value="${esc(p.author)}">`)));
+    card.append(el('div', '', f('專欄名稱', 'col', `<input type="text" value="${esc(p.col)}">`)));
+    card.append(el('label', 'inherit-box', `<input type="checkbox" ${p.ad ? 'checked' : ''}> 廣告／啟事`));
+    const b = el('button', 'btn', '改成沿用前頁標題'); b.onclick = () => { p.own = false; render(); };
+    card.append(b);
+  }
+  card.append(el('div', 'field', '<label>這一頁歸入的篇目（存檔時會合併連續頁）</label>' + `<div class="code">${(() => { let a = sel, z = sel; while (a > 0 && !pages[a].own) a--; while (z + 1 < N && !pages[z + 1].own) z++; return `第 ${a + 1}–${z + 1} 頁（共 ${z - a + 1} 頁）`; })()}</div>`));
+  const acts = el('div', 'acts', '<button class="btn" data-a="prev">上一頁 <kbd>←</kbd></button><button class="btn primary" data-a="ok">確認，下一頁 <kbd>Enter</kbd></button><button class="btn" data-a="flag">標記待查</button>');
+  acts.onclick = e => { const a = e.target.closest('button')?.dataset.a; if (!a) return; if (a === 'prev') go(sel - 1); if (a === 'ok') { confirmPage(p); say('已確認第 ' + p.n + ' 頁'); go(sel + 1); } if (a === 'flag') { p.confirmed = false; say('已標記待查'); render(); } };
+  card.append(acts);
+  const strip = $('v1strip'); strip.innerHTML = '';
+  pages.forEach((q, i) => {
+    const s = stOf(q), t = el('div', 'thumb' + (i === sel ? ' sel' : '') + (s === 'inh' ? ' inh' : ''), `<span class="n">${q.n}</span><span class="bar s-${s}"></span>`);
+    t.title = (q.own ? q.title : '↳ 沿用：' + (resolved(i)?.title || '無')) + '・' + stLabel[s];
+    t.onclick = () => go(i); strip.append(t);
+  });
+  strip.children[sel]?.scrollIntoView({ inline: 'center', block: 'nearest' });
+}
+
+/* ---------- 草稿 2 ---------- */
+function render2() {
+  const fb = $('v2filters'); fb.innerHTML = '';
+  [['all', '全部'], ['review', '待檢查'], ['inh', '沿用前頁'], ['bad', '缺題名'], ['ok', '已確認']].forEach(([k, l]) => {
+    const n = k === 'all' ? N : pages.filter(p => stOf(p) === k).length;
+    const c = el('button', 'chip', `${l} ${n}`); c.setAttribute('aria-pressed', filter === k); c.onclick = () => { filter = k; render(); }; fb.append(c);
+  });
+  const box = $('v2rows'); box.innerHTML = '';
+  pages.forEach((p, i) => {
+    const s = stOf(p); if (filter !== 'all' && s !== filter) return;
+    const r = resolved(i);
+    const row = el('div', 'row' + (i === sel ? ' sel' : ''));
+    row.append(el('div', 'pg', `${p.n}<small>…${p.tail.slice(-7)}</small>`));
+    const mid = el('div', '');
+    mid.append(el('div', 'tt' + (p.own ? '' : ' inh'), p.own ? (p.title ? esc(p.title) : '（請補題名）') : '↳ ' + esc(r ? r.title : '（無）')));
+    if (p.own) mid.append(el('div', 'sub', [p.col, p.author, p.ad ? '廣告' : ''].filter(Boolean).join('・') || '—'));
+    row.append(mid, el('div', '', `<span class="badge b-${s}">${stLabel[s]}</span>`));
+    if (i === sel) {
+      const ed = el('div', 'edit', `<div class="field full"><input type="text" value="${esc(p.own ? p.title : r ? r.title : '')}" ${p.own ? '' : 'disabled'}></div><div class="field"><input type="text" placeholder="作者" value="${esc(p.author)}"></div><div class="field"><input type="text" placeholder="專欄" value="${esc(p.col)}"></div><div class="full"><button class="btn primary" data-a="ok">確認</button> <button class="btn" data-a="own">${p.own ? '改為沿用前頁' : '這頁有新標題'}</button></div>`);
+      ed.onclick = e => { const a = e.target.dataset.a; if (!a) return; e.stopPropagation(); if (a === 'ok') { confirmPage(p); say('已確認'); go(sel + 1); } else { p.own = !p.own; render(); } };
+      row.append(ed);
+    }
+    row.onclick = () => go(i); box.append(row);
+  });
+  viewer($('v2viewer'), pages[sel]);
+  box.querySelector('.sel')?.scrollIntoView({ block: 'nearest' });
+}
+
+/* ---------- 草稿 3 ---------- */
+function render3() {
+  const wrap = $('v3sheet'); wrap.innerHTML = '';
+  const t = el('table', 'sheet-t');
+  t.innerHTML = '<thead><tr><th></th><th>頁</th><th>影像編號</th><th>題名</th><th>專欄</th><th>作者</th><th>狀態</th></tr></thead>';
+  const tb = el('tbody');
+  pages.forEach((p, i) => {
+    const s = stOf(p), r = resolved(i), prevSame = i > 0 && !p.own, nextSame = i + 1 < N && !pages[i + 1].own;
+    const pos = prevSame ? (nextSame ? 'mid' : 'last') : (nextSame ? 'first' : 'solo');
+    const tr = el('tr', i === sel ? 'sel' : '');
+    const ai = k => p.conf.includes(k) ? ' ai' : '';
+    tr.innerHTML = `<td class="range"><i class="${pos}"></i></td><td class="mono">${p.n}</td><td class="code"><b>…${p.tail}</b></td>
+      <td><input class="cell t${p.own ? '' : ' inh'}${ai('title')}" value="${esc(p.own ? p.title : '↳ ' + (r ? r.title : ''))}" ${p.own ? '' : 'readonly'}></td>
+      <td><input class="cell${ai('col')}" value="${esc(p.own ? p.col : '')}" ${p.own ? '' : 'tabindex="-1"'}></td>
+      <td><input class="cell${ai('author')}" value="${esc(p.own ? p.author : '')}" ${p.own ? '' : 'tabindex="-1"'}></td>
+      <td><span class="badge b-${s}">${stLabel[s]}</span></td>`;
+    tr.onclick = () => { if (sel !== i) go(i); };
+    tb.append(tr);
+  });
+  t.append(tb); wrap.append(t);
+  const bulk = el('div', 'bulk', `<span>左側長條＝存檔時會合併成同一篇目的頁</span><span class="sp"></span><button class="btn">全部標為已確認</button><button class="btn">只看待檢查</button>`);
+  wrap.append(bulk);
+  const p = pages[sel];
+  viewer($('v3viewer'), p);
+  $('v3meta').innerHTML = `第 ${p.n} 頁・<span class="code">${p.code}</span><br>${p.own ? esc(p.title || '（缺題名）') : '↳ 沿用：' + esc(resolved(sel)?.title || '無')}`;
+  wrap.querySelector('tr.sel')?.scrollIntoView({ block: 'nearest' });
+}
+
+function render() { progress(); if (v === 1) render1(); if (v === 2) render2(); if (v === 3) render3(); }
+document.querySelectorAll('.seg button').forEach(b => b.onclick = () => {
+  v = +b.dataset.v; document.querySelectorAll('.seg button').forEach(x => x.setAttribute('aria-pressed', x === b));
+  document.querySelectorAll('.view').forEach(s => s.classList.toggle('on', s.id === 'v' + v)); render();
+});
+document.addEventListener('keydown', e => {
+  if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); go(sel - 1); }
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); go(sel + 1); }
+  if (e.key === 'Enter') { confirmPage(pages[sel]); say('已確認第 ' + pages[sel].n + ' 頁'); go(sel + 1); }
+});
+$('batch').onclick = () => say('正式版：按下後依序分析全部 23 頁，顯示進度，可隨時暫停');
+render();
+</script>
+</body>
+</html>

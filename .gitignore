@@ -1,0 +1,15 @@
+# 私人設定與金鑰：絕對不要提交
+config.local.php
+
+# 掃描影像（數 GB，且可能有著作權）與編目資料：留在本機
+img/*
+!img/show.jpg
+data/*
+!data/.htaccess
+
+# 隨附的可攜式 PHP（約 90 MB，可由 windows.php.net 下載；cacert.pem 是從本機匯出的憑證）
+php/
+
+# 暫存
+*.tmp
+.claude/
