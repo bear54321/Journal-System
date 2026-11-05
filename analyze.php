@@ -8,6 +8,61 @@ require_once __DIR__ . '/lib.php';
 
 require_post();
 set_time_limit(300); // Gemini 回應可能要數十秒，預設的 30 秒會被 PHP 中斷
+
+// 框選辨識（本機 OCR）：把裁好的小圖轉給本機 OCR 服務（ocr/server.py），不需要 Gemini 金鑰，也不耗 API 額度
+if (($_POST['mode'] ?? '') === 'ocr') { // 框選辨識一律走本機 OCR
+  if (!function_exists('curl_init')) out('PHP 沒有啟用 curl 擴充', 500);
+  $raw = base64_decode((string)($_POST['image'] ?? ''), true);
+  if ($raw === false || $raw === '' || strlen($raw) > 6 * 1024 * 1024) out('框選的影像無法使用', 400);
+  // 服務剛啟動時模型還在載入（約 10 秒）：連不上就等一下再試，最多約 10 秒
+  for ($try = 0; $try < 5; $try++) {
+    $ch = curl_init(OCR_LOCAL_URL . '/ocr');
+    curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => $raw, CURLOPT_HTTPHEADER => ['Content-Type: application/octet-stream'], CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 3, CURLOPT_TIMEOUT => 90]);
+    $resp = curl_exec($ch); $code = curl_getinfo($ch, CURLINFO_RESPONSE_CODE); curl_close($ch);
+    if ($resp !== false && $code !== 0) break;
+    sleep(2);
+  }
+  if ($resp === false || $code === 0) out('本機 OCR 服務沒有啟動：請用 start.bat 啟動系統，或雙擊 ocr 資料夾裡的「啟動OCR.bat」。', 502);
+  $j = json_decode($resp, true);
+  if ($code !== 200 || !is_array($j)) out('本機 OCR 失敗：' . mb_substr((string)($j['error'] ?? $resp), 0, 200), 502);
+  out_json(['text' => trim(str_replace(["\r", "\n"], '', (string)($j['text'] ?? ''))), 'model' => '本機 OCR']);
+}
+
+// 整頁分析（本機 OCR）：mode=page / batch + engine=local。用 ocr/server.py 的規則式分析，不需要 Gemini 金鑰
+if (($_POST['engine'] ?? '') === 'local' && in_array($_POST['mode'] ?? 'page', ['page', 'batch'], true)) {
+  if (!function_exists('curl_init')) out('PHP 沒有啟用 curl 擴充', 500);
+  $lbook = get_book();
+  $limgs = list_images($lbook);
+  $lmode = ($_POST['mode'] ?? 'page') === 'batch' ? 'batch' : 'page';
+  $llabels = $lmode === 'batch' ? json_decode((string)($_POST['pages'] ?? ''), true) : [(string)($_POST['page'] ?? '')];
+  if (!is_array($llabels) || !$llabels || count($llabels) > 8) out('pages 需為 1–8 張影像編號', 400);
+  $lthread = (($_POST['thread'] ?? '') === '1') ? '1' : '0';
+  $lout = [];
+  foreach ($llabels as $l) {
+    $l = (string)$l;
+    if (!isset($limgs[$l])) out('找不到影像：' . $l, 400);
+    $bytes = @file_get_contents(img_dir($lbook) . DIRECTORY_SEPARATOR . $limgs[$l]);
+    if ($bytes === false || $bytes === '') out('讀不到影像：' . $l, 500);
+    $resp = false; $code = 0;
+    for ($try = 0; $try < 5; $try++) { // 服務剛啟動時模型還在載入：連不上就等一下再試
+      $ch = curl_init(OCR_LOCAL_URL . '/analyze?thread=' . $lthread);
+      curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => $bytes, CURLOPT_HTTPHEADER => ['Content-Type: application/octet-stream'], CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 3, CURLOPT_TIMEOUT => 180]);
+      $resp = curl_exec($ch); $code = curl_getinfo($ch, CURLINFO_RESPONSE_CODE); curl_close($ch);
+      if ($resp !== false && $code !== 0) break;
+      sleep(2);
+    }
+    if ($resp === false || $code === 0) out('本機 OCR 服務沒有啟動：請用 start.bat 啟動系統，或雙擊 ocr 資料夾裡的「start-ocr.bat」。', 502);
+    $j = json_decode($resp, true);
+    if ($code !== 200 || !is_array($j)) out('本機 OCR 失敗：' . mb_substr((string)($j['error'] ?? $resp), 0, 200), 502);
+    $arts = [];
+    foreach (($j['articles'] ?? []) as $a) {
+      $arts[] = ['title' => (string)($a['title'] ?? ''), 'column_name' => (string)($a['column_name'] ?? ''), 'author' => (string)($a['author'] ?? ''), 'author_role' => (string)($a['author_role'] ?? ''), 'is_ad' => false, 'uncertain' => []];
+    }
+    $lout[$l] = ['articles' => $arts, 'printed_page' => normalize_page($j['printed_page'] ?? ''), 'printed_raw' => (string)($j['printed_page'] ?? '')];
+  }
+  if ($lmode === 'page') { $one = $lout[(string)$llabels[0]]; unset($one['printed_raw']); $one['model'] = '本機 OCR'; out_json($one); }
+  out_json(['pages' => (object)$lout, 'model' => '本機 OCR']);
+}
 // 金鑰：使用者在前端「AI 設定」輸入的優先（額度各自計算），沒有才用伺服器 config.local.php 裡的預設金鑰
 $apiKey = trim((string)($_POST['api_key'] ?? ''));
 if ($apiKey !== '' && !preg_match('/^[A-Za-z0-9_.\-]{20,200}$/', $apiKey)) out('金鑰格式不正確，請重新貼上。', 400);
@@ -28,7 +83,7 @@ if (($_POST['mode'] ?? '') === 'test') {
 }
 
 $book = get_book();
-$mode = in_array($_POST['mode'] ?? '', ['toc', 'batch'], true) ? $_POST['mode'] : 'page';
+$mode = in_array($_POST['mode'] ?? '', ['toc', 'batch', 'ocr'], true) ? $_POST['mode'] : 'page';
 $thread = (($_POST['thread'] ?? '') === '1'); // 線裝書模式：頁碼以中縫（版心）為主
 $images = list_images($book);
 
@@ -38,7 +93,7 @@ if ($mode === 'batch') {
   if (!is_array($labels) || !$labels || count($labels) > 8) out('pages 需為 1–8 張影像編號', 400);
   $labels = array_map('strval', array_values($labels));
 } else {
-  $labels = [isset($_POST['page']) ? (string)$_POST['page'] : ''];
+  $labels = $mode === 'ocr' ? [] : [isset($_POST['page']) ? (string)$_POST['page'] : '']; // ocr：前端框選的小圖，不對應整張影像
 }
 foreach ($labels as $l) if (!isset($images[$l])) out('找不到影像：' . $l, 400);
 
@@ -127,7 +182,23 @@ if ($thread) $pageRules .= "- 【線裝書】這一本的頁碼不是印在版�
 
 $edge = $thread ? max(ANALYZE_MAX_EDGE, 2400) : ANALYZE_MAX_EDGE; // 中縫的字很小，線裝書用較高解析度
 $parts = [];
-if ($mode === 'toc') {
+if ($mode === 'ocr') {
+  // 框選辨識：前端把使用者框選的區域裁成小圖送來，只轉錄裡面的文字，用來填單一欄位
+  $fieldNames = ['title' => '主要題名', 'author' => '作者', 'column' => '專欄名稱', 'role' => '作者角色（如「譯」「撰」「編」）'];
+  $field = (string)($_POST['field'] ?? 'title');
+  if (!isset($fieldNames[$field])) out('field 不正確', 400);
+  $raw = base64_decode((string)($_POST['image'] ?? ''), true);
+  if ($raw === false || $raw === '' || strlen($raw) > 6 * 1024 * 1024) out('框選的影像無法使用', 400);
+  $info = @getimagesizefromstring($raw);
+  if (!$info || !in_array($info[2], [IMAGETYPE_JPEG, IMAGETYPE_PNG], true)) out('框選的影像格式不正確', 400);
+  $schema = ['type' => 'OBJECT', 'properties' => ['text' => ['type' => 'STRING']], 'required' => ['text']];
+  $hint = ['title' => '標題文字', 'author' => '作者姓名（有多位用「、」連接；不要包含「撰」「著」「譯」等角色字）', 'column' => '專欄或欄目名稱', 'role' => '作者的角色字（如「譯」「撰」「編」）'][$field];
+  $parts[] = ['text' => "這是從一份中文期刊、圖書或古籍掃描影像中框選出來的一小塊區域（可能是直排、繁體、舊字體）。請逐字轉錄區域內的文字，用來填入「" . $fieldNames[$field] . "」欄位，內容應是" . $hint . "。\n"
+    . "- 直排文字由右到左、由上到下讀；多行連成一段，不要加空白或換行。\n"
+    . "- 使用影像中的原文，保留繁體字與異體字，不要轉成簡體，也不要改寫、補字或加標點。\n"
+    . "- 只回傳區域內看得見的文字；看不清楚或沒有文字就回傳空字串，不要猜測。"];
+  $parts[] = ['inline_data' => ['mime_type' => image_type_to_mime_type($info[2]), 'data' => base64_encode($raw)]];
+} elseif ($mode === 'toc') {
   $article['properties']['page'] = ['type' => 'STRING'];
   $article['properties']['level'] = ['type' => 'INTEGER'];
   $article['required'] = ['title', 'page'];
@@ -224,6 +295,7 @@ $clean = function (&$rows) use ($book) {
 };
 if (isset($result['articles'])) $clean($result['articles']);
 if (isset($result['entries'])) $clean($result['entries']);
+if ($mode === 'ocr') $result['text'] = trim(str_replace(["\r", "\n"], '', (string)($result['text'] ?? '')));
 if (isset($result['printed_page'])) $result['printed_page'] = normalize_page($result['printed_page']);
 if ($mode === 'batch') {
   $byLabel = [];

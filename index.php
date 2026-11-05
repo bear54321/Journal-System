@@ -226,6 +226,35 @@ legend { font-weight: 700; padding: 0; margin-bottom: 6px; color: var(--accent);
 kbd { font: 11px var(--mono); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--panel); color: var(--muted); }
 .btn.primary kbd { background: rgba(255,255,255,.2); border-color: rgba(255,255,255,.4); color: #fff; }
 .pv-viewer { position: relative; background: var(--stage); border-radius: 8px; overflow: hidden; cursor: grab; touch-action: none; min-height: 0; }
+/* 框選辨識：彩色 AI 按鈕與掃描特效 */
+@property --ai-ang { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
+.fi-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.fi-row input[type="text"] { flex: 1 1 auto; min-width: 0; }
+.ai-btn { flex: none; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 9px; cursor: pointer; color: #fff; font: 800 12px/1 var(--sans, system-ui, sans-serif); letter-spacing: .02em; text-shadow: 0 1px 2px rgba(0,0,0,.35);
+  background: linear-gradient(135deg, #ff5f6d, #ffb347 28%, #47d1a4 52%, #4facfe 76%, #a56cff); background-size: 220% 220%; box-shadow: 0 1px 4px rgba(80,60,160,.35); transition: transform .12s, box-shadow .12s; }
+.ai-btn:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgba(120,90,220,.45); animation: ai-shift 2.4s linear infinite; }
+.ai-btn.on, .ai-btn.busy { animation: ai-shift 1.1s linear infinite; box-shadow: 0 0 0 2px var(--panel, #fff), 0 0 0 4px #a56cff, 0 0 14px rgba(165,108,255,.7); }
+@keyframes ai-shift { 0% { background-position: 0% 50%; } 100% { background-position: 220% 50%; } }
+.pv-viewer.picking { cursor: crosshair; }
+.pv-pick { position: absolute; inset: 0; z-index: 2; cursor: crosshair; touch-action: none; background: rgba(8,12,24,.28); }
+.pv-pick-hint { position: absolute; left: 50%; top: 42px; transform: translateX(-50%); padding: 5px 14px; border-radius: 999px; font-size: 12px; color: #fff; white-space: nowrap; pointer-events: none;
+  background: rgba(20,22,40,.82); box-shadow: 0 0 0 1px rgba(255,255,255,.25), 0 4px 18px rgba(0,0,0,.4); }
+.pv-zoom { z-index: 3; }
+.pv-tag { z-index: 3; }
+.pv-sel { position: absolute; border-radius: 8px; pointer-events: none; box-sizing: border-box; }
+.pv-sel.drawing { border: 2px solid #fff; background: rgba(79,172,254,.18); box-shadow: 0 0 0 9999px rgba(8,12,24,.35); }
+.pv-sel.scan, .pv-sel.done { border: 0; background: rgba(255,255,255,.10); box-shadow: 0 0 0 9999px rgba(8,12,24,.45), 0 0 26px 6px rgba(130,110,255,.55), 0 0 60px 14px rgba(79,172,254,.30); }
+.pv-sel.scan::before, .pv-sel.done::before { content: ''; position: absolute; inset: -3px; border-radius: 11px; padding: 3px; pointer-events: none;
+  background: conic-gradient(from var(--ai-ang), #ff5f6d, #ffb347, #47d1a4, #4facfe, #a56cff, #ff5f6d);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  animation: ai-rot 1.5s linear infinite; }
+.pv-sel.scan::after { content: ''; position: absolute; inset: 0; border-radius: 8px; pointer-events: none; overflow: hidden;
+  background: linear-gradient(180deg, transparent 0, rgba(255,255,255,.55) 50%, transparent 100%) 0 -60% / 100% 45% no-repeat; animation: ai-sweep 1.2s ease-in-out infinite; }
+.pv-sel.done { box-shadow: 0 0 0 9999px rgba(8,12,24,.0), 0 0 30px 8px rgba(71,209,164,.6); transition: box-shadow .4s; }
+@keyframes ai-rot { to { --ai-ang: 360deg; } }
+@keyframes ai-sweep { 0% { background-position: 0 -60%; } 100% { background-position: 0 160%; } }
+.pv-edit input.ai-filled { animation: ai-filled 1.5s ease-out; }
+@keyframes ai-filled { 0% { box-shadow: 0 0 0 3px #a56cff, 0 0 18px 4px rgba(79,172,254,.8); background: #f3efff; } 100% { box-shadow: 0 0 0 0 rgba(165,108,255,0); } }
 .pv-viewer img { position: absolute; left: 0; top: 0; max-width: none; user-select: none; -webkit-user-drag: none; box-shadow: 0 6px 28px rgba(0,0,0,.5); }
 .pv-tag { position: absolute; left: 12px; top: 10px; background: rgba(0,0,0,.55); color: #fff; border-radius: 6px; padding: 2px 10px; font-size: 12px; font-family: var(--mono); }
 .pv-zoom { position: absolute; right: 12px; bottom: 10px; display: flex; gap: 4px; }
@@ -396,7 +425,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-bottom-width
 <dialog id="aiDlg" aria-labelledby="aiTitle" style="width:min(560px, calc(100vw - 32px))">
   <div class="dlg-head"><h2 id="aiTitle">AI 設定</h2><button class="btn" type="button" data-close>關閉</button></div>
   <div class="dlg-body">
-    <p style="margin-top:0">辨識功能使用 Google Gemini。每位使用者可以輸入自己的 API 金鑰，額度各自計算；沒有輸入時，會使用伺服器設定的預設金鑰（如果有的話）。</p>
+    <p style="margin-top:0">整頁辨識（分析整期、重新分析、分析本頁／目錄）使用 Google Gemini；欄位旁的彩色 AI 按鈕（框選圖片文字）只用本機 OCR，不使用金鑰。每位使用者可以輸入自己的 API 金鑰，額度各自計算；沒有輸入時，會使用伺服器設定的預設金鑰（如果有的話）。</p>
     <div class="field" style="display:flex;flex-direction:column;gap:4px">
       <label for="aiKey">Gemini API 金鑰</label>
       <div class="inline"><input type="password" id="aiKey" autocomplete="off" spellcheck="false" placeholder="貼上您的金鑰" style="flex:1 1 auto"><button class="btn" type="button" id="aiShow">顯示</button></div>
@@ -412,8 +441,16 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-bottom-width
     <button class="btn danger" type="button" id="aiClear">清除我的金鑰</button>
   </div>
 </dialog>
+<dialog id="engineDlg" aria-labelledby="engTitle" style="width:min(520px, calc(100vw - 32px))">
+  <div class="dlg-head"><h2 id="engTitle">選擇分析方式</h2></div>
+  <div class="dlg-body" style="display:flex;flex-direction:column;gap:10px">
+    <button class="btn" type="button" id="engApi" style="text-align:left;padding:10px 12px;line-height:1.5"><strong>API 分析（Gemini）</strong><br><span class="notice">較準確，能判斷題名、作者、專欄；會耗用 API 額度，需要金鑰。</span></button>
+    <button class="btn primary" type="button" id="engLocal" style="text-align:left;padding:10px 12px;line-height:1.5"><strong>本機 OCR 分析（free）</strong><br><span style="opacity:.9;font-size:12px">免費、不連網、不耗額度。以文字位置與「第○節」「目錄」等規則推測篇目與頁碼，較粗略；結果都會標為「待檢查」，請逐頁核對。</span></button>
+  </div>
+  <div class="dlg-foot"><span class="spacer"></span><button class="btn" type="button" id="engCancel">取消</button></div>
+</dialog>
 <div class="toast" id="toast" role="status" hidden></div>
 <script>window.BOOKS = <?= json_encode(array_values($books), JSON_UNESCAPED_UNICODE) ?>; window.SERVER_KEY = <?= GEMINI_API_KEY !== '' ? 'true' : 'false' ?>;</script>
 <script src="app.js?v=4"></script>
-<script src="pages.js?v=6"></script>
+<script src="pages.js?v=10"></script>
 </body></html>

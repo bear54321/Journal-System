@@ -25,3 +25,5 @@ if (!defined('GEMINI_MODEL')) define('GEMINI_MODEL', 'gemini-3.5-flash');
 if (!defined('GEMINI_MODELS')) define('GEMINI_MODELS', [GEMINI_MODEL, 'gemini-3-flash-preview', 'gemini-3.5-flash-lite']); // lite 最便宜但頁碼常常辨識錯誤，排在最後
 // 送出前把影像縮到長邊不超過這個像素（需要 GD 擴充），可加快速度並節省額度
 if (!defined('ANALYZE_MAX_EDGE')) define('ANALYZE_MAX_EDGE', 2000);
+// 本機 OCR 服務（ocr/server.py）的位址；框選辨識選「本機 OCR」時使用
+if (!defined('OCR_LOCAL_URL')) define('OCR_LOCAL_URL', 'http://127.0.0.1:8765');

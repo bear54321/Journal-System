@@ -13,3 +13,10 @@ php/
 # 暫存
 *.tmp
 .claude/
+
+# 隨附的可攜式 Python 與 OCR 模型（約 400 MB；重建方式見 ocr/README.txt）
+ocr/python/
+ocr/server.log
+ocr/get-pip.py
+
+ocr/__pycache__/

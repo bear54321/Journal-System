@@ -147,7 +147,7 @@ function toRec(res) {
 }
 const RETRYABLE = /頻繁|忙碌|high demand|連線/; // 「今天的免費額度已用完」不重試，重試也沒有用
 async function callAnalyze(is, params) {
-  if (!hasKey()) { openAiDlg('請先輸入您的 Gemini API 金鑰，才能使用 AI 辨識。'); throw new Error('尚未設定 AI 金鑰'); }
+  if (params.engine !== 'local' && !hasKey()) { openAiDlg('請先輸入您的 Gemini API 金鑰，才能使用 AI 辨識。'); throw new Error('尚未設定 AI 金鑰'); }
   for (let tries = 1; ; tries++) {
     try {
       const res = parse(await api('analyze.php', { book: is.id, ...(isThread(is) ? { thread: '1' } : {}), ...params }), null);
@@ -159,8 +159,9 @@ async function callAnalyze(is, params) {
     }
   }
 }
-const analyzeOne = async (is, p) => { const res = await callAnalyze(is, { page: p.label, mode: 'page' }); const r = toRec(res); carryPnoFlags(is.rec[p.label], r); applyAiPno(is, p, r, res.printed_page, res.model); return r; };
+const analyzeOne = async (is, p) => { const res = await callAnalyze(is, { page: p.label, mode: 'page', ...engineParam() }); const r = toRec(res); carryPnoFlags(is.rec[p.label], r); applyAiPno(is, p, r, res.printed_page, res.model); return r; };
 
+const engineParam = () => (PV.engine === 'local' ? { engine: 'local' } : {});
 const GROUP = 4; // 每次請求送幾頁；免費額度是限制「請求次數」，多頁合併可以大幅節省
 async function runBatch(redo) {
   const is = issue();
@@ -168,34 +169,48 @@ async function runBatch(redo) {
   const todo = is.pages.filter(p => { const r = is.rec[p.label]; return redo ? !(r && r.ok) : !r; });
   if (!todo.length) { toast('沒有需要分析的頁面'); return; }
   const groups = [];
-  for (let k = 0; k < todo.length; k += GROUP) groups.push(todo.slice(k, k + GROUP));
+  const gsz = PV.engine === 'local' ? 2 : GROUP; // 本機 OCR 一次兩頁，進度條走得比較順
+  for (let k = 0; k < todo.length; k += gsz) groups.push(todo.slice(k, k + gsz));
   const b = PV.batch = { is, total: todo.length, done: 0, fail: [], stop: false, error: '', models: new Set() };
   let next = 0;
   const worker = async () => {
     while (!b.stop && next < groups.length) {
       const g = groups[next++];
       try {
-        const res = await callAnalyze(is, { pages: JSON.stringify(g.map(p => p.label)), mode: 'batch' });
+        const res = await callAnalyze(is, { pages: JSON.stringify(g.map(p => p.label)), mode: 'batch', ...engineParam() });
         if (res.model) b.models.add(res.model);
         g.forEach(p => { const x = res.pages && res.pages[p.label]; if (x) { const old = is.rec[p.label], nr = toRec(x); carryPnoFlags(old, nr); is.rec[p.label] = nr; applyAiPno(is, p, nr, x.printed_page, res.model); } else b.fail.push(p.label); });
       } catch (e) {
         g.forEach(p => b.fail.push(p.label)); b.error = e.message;
-        if (/今天的免費額度|金鑰|尚未設定|API key|PERMISSION|UNAUTHENTICATED/i.test(e.message)) { b.stop = true; if (/API key|PERMISSION|UNAUTHENTICATED|金鑰無效/i.test(e.message)) openAiDlg('這把金鑰無法使用：' + e.message); }
+        if (/今天的免費額度|金鑰|尚未設定|API key|PERMISSION|UNAUTHENTICATED|沒有啟動/i.test(e.message)) { b.stop = true; if (/API key|PERMISSION|UNAUTHENTICATED|金鑰無效/i.test(e.message)) openAiDlg('這把金鑰無法使用：' + e.message); }
       }
       b.done += g.length; recSaveSoon(is);
       if (is === issue()) pvRender();
     }
   };
   pvRender();
-  await Promise.all([worker(), worker()]); // 同時 2 組，避免超過每分鐘請求數
+  await Promise.all(PV.engine === 'local' ? [worker()] : [worker(), worker()]); // API：同時 2 組，避免超過每分鐘請求數；本機 OCR 吃 CPU，一次一組
   PV.batch = null; recFlush();
   const left = todo.filter(p => !is.rec[p.label]).length;
   pvRender();
   if (b.error && left) toast(b.error + `（尚餘 ${left} 頁，已分析的都已保留，之後可按「繼續分析」）`);
   else toast(b.stop ? '已暫停，之後可按「繼續分析」' : left ? `完成，但有 ${left} 頁失敗，可按「繼續分析」重試` : '整期分析完成，請逐頁核對');
-}$('pvBatch').onclick = () => {
+}// 分析前先問：API（Gemini）或本機 OCR（免費）
+function askEngine() {
+  return new Promise(resolve => {
+    const d = $('engineDlg'); let pick = null;
+    const done = v => { pick = v; d.close(); };
+    $('engApi').onclick = () => done('api'); $('engLocal').onclick = () => done('local'); $('engCancel').onclick = () => done(null);
+    d.onclose = () => { d.onclose = null; resolve(pick); };
+    d.showModal();
+  });
+}
+$('pvBatch').onclick = async () => {
   const is = issue();
   if (!is.id) return toast('請先選擇期刊');
+  const eng = await askEngine();
+  if (!eng) return;
+  PV.engine = eng;
   const unanalyzed = is.pages.filter(p => !is.rec[p.label]).length;
   runBatch(unanalyzed === 0);
 };
@@ -232,7 +247,7 @@ function pvShowImage() {
   const is = issue(), p = is.pages[PV.sel];
   if (!p) { $('pvImg').removeAttribute('src'); $('pvTag').textContent = ''; PV.lastSrc = ''; return; }
   const src = imgUrl(is.id, p.label);
-  if (src !== PV.lastSrc) { PV.lastSrc = src; $('pvImg').src = src; }
+  if (src !== PV.lastSrc) { cancelPick(); PV.lastSrc = src; $('pvImg').src = src; }
   $('pvTag').textContent = `第 ${PV.sel + 1} 頁・…${pvTail(p.label)}` + (p.pno ? `・頁碼 ${p.pno}` : '');
 }
 
@@ -350,7 +365,7 @@ function pvEditor(i) {
       const inp = h('input'); inp.type = 'text'; inp.value = r[key] || ''; inp.dataset.k = key;
       inp.oninput = () => { r[key] = inp.value; touch(r); refresh(); };
       inp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); if (pvConfirm(i)) pvSelect(i + 1); } if (e.key === 'Escape') inp.blur(); };
-      f.append(lab, inp); return f;
+      const row = h('div', 'fi-row'); row.append(aiPickBtn(key, inp, r, refresh), inp); f.append(lab, row); return f;
     };
     wrap.append(field('主要題名', 'title', true), field('作者', 'author'), field('專欄名稱', 'column'));
     const adl = h('label', 'f'); const cb = h('input'); cb.type = 'checkbox'; cb.checked = !!r.ad; cb.onchange = () => { r.ad = cb.checked; touch(r); refresh(); };
@@ -594,6 +609,74 @@ $('dataType').onchange = () => {
     .then(() => { is.meta = meta; toast('資料類型：' + t + (t === '線裝書' ? '（分析時以中縫版心的頁碼為主；已分析過的頁不會重辨識）' : '')); })
     .catch(e => { toast('存檔失敗：' + e.message); pvRender(); });
 };
+
+/* ---------- 框選圖片文字 → AI 辨識填入欄位（欄位左側的彩色「AI」按鈕） ---------- */
+function cancelPick() {
+  const k = PV.pick; if (!k) return;
+  PV.pick = null; k.el.remove(); k.btn.classList.remove('on', 'busy');
+  $('pvViewer').classList.remove('picking');
+}
+// 畫面座標（相對 viewer）→ 影像座標，裁成 JPEG（長邊最多 1600），回傳 base64
+function cropToB64(x, y, w, h) {
+  const img = $('pvImg'), s = pvView.s;
+  const sx = Math.max(0, (x - pvView.x) / s), sy = Math.max(0, (y - pvView.y) / s);
+  const ex = Math.min(img.naturalWidth, (x + w - pvView.x) / s), ey = Math.min(img.naturalHeight, (y + h - pvView.y) / s);
+  const cw = ex - sx, ch = ey - sy; if (cw < 4 || ch < 4) return null;
+  const k = Math.min(1, 1600 / Math.max(cw, ch)), c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(cw * k)); c.height = Math.max(1, Math.round(ch * k));
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+  g.drawImage(img, sx, sy, cw, ch, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.92).split(',')[1];
+}
+// 框選區域 → 文字：一律使用本機 OCR（不呼叫任何 API、不耗額度）
+async function ocrRegion(key, b64) {
+  return parse(await api('analyze.php', { book: issue().id, mode: 'ocr', engine: 'local', field: key, image: b64 }), {}).text || '';
+}
+function startPick(btn, run) {
+  cancelPick();
+  const box = $('pvViewer');
+  if (!$('pvImg').naturalWidth) return toast('這一頁的影像還沒載入');
+  const el = h('div', 'pv-pick'), hint = h('div', 'pv-pick-hint', '拖曳框選要辨識的文字（可用滾輪放大）・Esc 取消'), sel = h('div', 'pv-sel');
+  sel.hidden = true; el.append(hint, sel); box.append(el); box.classList.add('picking'); btn.classList.add('on');
+  const k = PV.pick = { btn, el, busy: false };
+  let st = null;
+  const place = (x1, y1, x2, y2) => { sel.style.left = Math.min(x1, x2) + 'px'; sel.style.top = Math.min(y1, y2) + 'px'; sel.style.width = Math.abs(x2 - x1) + 'px'; sel.style.height = Math.abs(y2 - y1) + 'px'; };
+  const pos = e => { const r = box.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  el.addEventListener('pointerdown', e => {
+    if (k.busy) return;
+    e.stopPropagation(); e.preventDefault();
+    const [x, y] = pos(e); st = { x, y }; el.setPointerCapture(e.pointerId);
+    sel.hidden = false; sel.className = 'pv-sel drawing'; place(x, y, x, y);
+  });
+  el.addEventListener('pointermove', e => { if (st && !k.busy) { const [x, y] = pos(e); place(st.x, st.y, x, y); } });
+  el.addEventListener('pointerup', async e => {
+    if (!st || k.busy) return;
+    const [x, y] = pos(e), x0 = Math.min(st.x, x), y0 = Math.min(st.y, y), w = Math.abs(x - st.x), hh = Math.abs(y - st.y);
+    st = null;
+    if (w < 8 || hh < 8) { sel.hidden = true; return; } // 太小視為誤點，讓使用者重框
+    const b64 = cropToB64(x0, y0, w, hh);
+    if (!b64) { sel.hidden = true; return toast('框選範圍在影像之外，請重新框選'); }
+    k.busy = true; sel.className = 'pv-sel scan'; hint.textContent = 'AI 辨識中…'; btn.classList.add('busy');
+    try { await run(b64); } catch (err) { toast(err.message || String(err)); }
+    sel.classList.add('done'); hint.textContent = '完成';
+    setTimeout(() => { if (PV.pick === k) cancelPick(); }, 700);
+  });
+}
+function aiPickBtn(key, inp, r, refresh) {
+  const b = h('button', 'ai-btn', 'AI'); b.type = 'button';
+  b.title = '框選圖片中的文字，用 AI 辨識後填入這個欄位'; b.setAttribute('aria-label', 'AI 框選辨識');
+  b.onclick = () => {
+    if (PV.pick && PV.pick.btn === b) return cancelPick();
+    startPick(b, async b64 => {
+      const text = (await ocrRegion(key, b64)).trim();
+      if (!text) return toast('框選範圍內沒有辨識到文字，請重新框選');
+      inp.value = text; r[key] = text; touch(r); refresh();
+      inp.classList.add('ai-filled'); setTimeout(() => inp.classList.remove('ai-filled'), 1600);
+    });
+  };
+  return b;
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && PV.pick && !PV.pick.busy) cancelPick(); });
 
 updateKeyState();
 pvRender();

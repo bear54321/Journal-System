@@ -21,6 +21,13 @@ if not defined PHP (
   exit /b 1
 )
 
+rem Local OCR service (optional): used by the AI box-select button
+if exist "%~dp0ocr\python\python.exe" (
+  start "Local OCR" /min "%~dp0ocr\python\python.exe" "%~dp0ocr\server.py"
+) else (
+  echo [Note] ocr\python not found - local OCR is off. Run ocr\install-ocr.bat to set it up.
+)
+
 echo Journal system: http://localhost:8080/index.php
 echo Close this window to stop the server.
 start "" http://localhost:8080/index.php
