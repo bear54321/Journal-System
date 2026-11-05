@@ -19,7 +19,7 @@ natcasesort($books);
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>郭廷以圖書館數位化資料編目工作臺</title>
 <meta name="claude:viewport-fit-sides" content="cover">
-<link rel="stylesheet" href="ui.css?v=25">
+<link rel="stylesheet" href="ui.css?v=31">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs><linearGradient id="aiGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff5f6d"/><stop offset=".3" stop-color="#ffb347"/><stop offset=".55" stop-color="#47d1a4"/><stop offset=".78" stop-color="#4facfe"/><stop offset="1" stop-color="#a56cff"/></linearGradient></defs></svg>
@@ -35,7 +35,7 @@ natcasesort($books);
     </nav>
     <div class="sb-label">工具</div>
     <nav class="sb-nav" aria-label="工具">
-      <button class="sb-item" id="openMeta" type="button"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span>雜誌編目</span></button>
+      <button class="sb-item" id="openMeta" type="button"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span>載體編目</span></button>
       <button class="sb-item" id="openPages" type="button"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></svg><span>編輯頁碼</span></button>
       <button class="sb-item" id="openExport" type="button"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>匯出與還原</span></button>
       <button class="sb-item" id="openAi" type="button" title="輸入您自己的 Gemini API 金鑰"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg><span>AI 設定</span></button>
@@ -119,7 +119,7 @@ natcasesort($books);
           <button class="btn ghost sm" id="formToggle" type="button" aria-expanded="true" aria-controls="entryForm" title="收合或展開表單，讓篇目目錄有更大的空間"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg><span>收合</span></button>
         </div>
         <div class="fields">
-          <div class="field"><label for="fTitle" class="req">主要題名</label><textarea id="fTitle" rows="2"></textarea></div>
+          <div class="field"><label for="fTitle" class="req">主要題名</label><textarea id="fTitle" rows="2"></textarea><div class="cands" id="titleCands" hidden></div></div>
           <div class="field"><label for="fColumn">專欄名稱</label><input type="text" id="fColumn"></div>
           <div class="field"><label for="fAuthor">作者</label><input type="text" id="fAuthor"></div>
           <div class="field"><label for="fRole">作者角色頭銜</label><input type="text" id="fRole" placeholder="如：譯"></div>
@@ -160,7 +160,7 @@ natcasesort($books);
 </div>
 
 <dialog id="metaDlg" aria-labelledby="metaTitle">
-  <div class="dlg-head"><h2 id="metaTitle">雜誌編目</h2><button class="btn ghost" type="button" data-close>關閉</button></div>
+  <div class="dlg-head"><h2 id="metaTitle">載體編目</h2><button class="btn ghost" type="button" data-close>關閉</button></div>
   <div class="dlg-body" id="metaBody"></div>
   <div class="dlg-foot"><button class="btn primary" type="button" id="metaSave">存檔</button></div>
 </dialog>
@@ -224,8 +224,12 @@ natcasesort($books);
   </div>
   <div class="dlg-foot"><span class="spacer"></span><button class="btn" type="button" id="engCancel">取消</button></div>
 </dialog>
+<dialog id="imgPreview" class="img-preview" aria-label="影像預覽">
+  <div class="img-bar"><span class="img-cap" id="imgPreviewCap"></span><span class="spacer"></span><span class="notice" id="imgPreviewHint">點圖片可放大／縮小・Esc 關閉</span><button class="btn ghost" type="button" data-close>關閉</button></div>
+  <div class="img-stage" id="imgStage"><img id="imgPreviewImg" alt=""></div>
+</dialog>
 <div class="toast" id="toast" role="status" hidden></div>
 <script>window.BOOKS = <?= json_encode(array_values($books), JSON_UNESCAPED_UNICODE) ?>; window.SERVER_KEY = <?= GEMINI_API_KEY !== '' ? 'true' : 'false' ?>;</script>
-<script src="app.js?v=14"></script>
-<script src="pages.js?v=21"></script>
+<script src="app.js?v=18"></script>
+<script src="pages.js?v=31"></script>
 </body></html>

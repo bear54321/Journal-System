@@ -15,7 +15,7 @@ $h = function ($s) { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
   <meta charset="UTF-8">
   <title>修改頁碼 - <?= $h($book) ?></title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="../ui.css?v=25">
+  <link rel="stylesheet" href="../ui.css?v=31">
   <style>
     body { height: auto; }
     .pw-bar { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px var(--gutter); background: var(--glass); -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px); border-bottom: 1px solid var(--line); }

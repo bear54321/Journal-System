@@ -3,11 +3,43 @@
    own=false 表示這頁沒有新標題，沿用前面最近一頁的標題；ok 表示人工確認過 */
 
 const ST_LABEL = { ok: '已確認', review: '待檢查', inh: '沿用前頁', bad: '缺題名', none: '未分析' };
-const PV = { sel: 0, filter: 'all', batch: null, lastSrc: '', saving: false, dirty: new Set(), timer: null };
+const PV = { flash: new Set(), sel: 0, filter: 'all', batch: null, lastSrc: '', saving: false, dirty: new Set(), timer: null };
 const pvView = { s: 1, x: 0, y: 0, nw: 1, nh: 1, fit: 1, moved: false };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const h = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
 
+// AI 辨識中：在影像檢視器外緣出現流動的彩虹光環與掃描光帶（Apple Intelligence 風格）
+function aiScan(box, on) {
+  let el = box.querySelector(':scope > .ai-scan');
+  if (!on) {
+    box.classList.remove('ai-busy');
+    if (el) { el.classList.remove('on'); setTimeout(() => { if (!el.classList.contains('on')) el.remove(); }, 450); }
+    return;
+  }
+  if (!el) { el = h('div', 'ai-scan'); el.append(h('i', 'ai-sweep')); box.append(el); }
+  void el.offsetWidth; el.classList.add('on'); box.classList.add('ai-busy');
+}
+// 題名候選：整句（點一下換成該版本）＋ 有疑問的字（點一下換掉那個字）。cands = { alts: [...], diff: [{ i, chars: [...] }] }
+function renderCands(box, cands, getVal, setVal) {
+  box.replaceChildren();
+  if (!cands || (!(cands.alts || []).length && !(cands.diff || []).length)) { box.hidden = true; return; }
+  box.hidden = false;
+  const cur = getVal();
+  const again = () => renderCands(box, cands, getVal, setVal);
+  const chip = (text, on, fn, cls) => { const b = h('button', 'cand-chip' + (on ? ' on' : '') + (cls ? ' ' + cls : ''), text); b.type = 'button'; b.onclick = fn; return b; };
+  const all = [cur, ...(cands.alts || []).filter(t => t !== cur)];
+  if (all.length > 1) {
+    const row = h('div', 'cand-row'); row.append(h('span', 'cand-label', '候選題名'));
+    all.forEach(t => row.append(chip(t, t === cur, () => { setVal(t); again(); })));
+    box.append(row);
+  }
+  (cands.diff || []).forEach(d => {
+    if (d.i >= cur.length) return;
+    const row = h('div', 'cand-row'); row.append(h('span', 'cand-label', '第 ' + (d.i + 1) + ' 字'));
+    d.chars.forEach(c => row.append(chip(c, cur[d.i] === c, () => { const v = getVal(); setVal(v.slice(0, d.i) + c + v.slice(d.i + 1)); again(); }, 'cand-char')));
+    box.append(row);
+  });
+}
 const pvRec = () => issue().rec;
 const pvTail = label => (label.length > 12 ? label.slice(-7) : label); // …00001-00022 → 1-00022
 function pvResolved(i) { // 這頁實際歸屬的標題：自己有標題就用自己的，否則往前找
@@ -143,6 +175,7 @@ function toRec(res) {
   r.unsure = (a.uncertain || []).map(k => (k === 'column_name' ? 'column' : k));
   r.more = list.slice(1).map(pick);
   r.ai = pick(a);
+  Object.defineProperty(r, 'cands', { value: { alts: a.alts || [], diff: a.diff || [] }, enumerable: false, writable: true });
   return r;
 }
 const RETRYABLE = /頻繁|忙碌|high demand|連線/; // 「今天的免費額度已用完」不重試，重試也沒有用
@@ -159,10 +192,39 @@ async function callAnalyze(is, params) {
     }
   }
 }
-const analyzeOne = async (is, p) => { const res = await callAnalyze(is, { page: p.label, mode: 'page', ...engineParam() }); const r = toRec(res); carryPnoFlags(is.rec[p.label], r); applyAiPno(is, p, r, res.printed_page, res.model); return r; };
+const analyzeOne = async (is, p) => { const res = await callAnalyze(is, { page: p.label, mode: 'page', ...engineParam(), ...firstParam(is, [p]) }); const r = toRec(res); carryPnoFlags(is.rec[p.label], r); applyAiPno(is, p, r, res.printed_page, res.model); return r; };
 
 const engineParam = () => (PV.engine === 'local' ? { engine: 'local' } : {});
+// 這一批的第一張是整本資料的第一頁時，告訴 AI（用來判斷封面）
+const firstParam = (is, group) => (is.pages.length && group.length && group[0].label === is.pages[0].label ? { first: '1' } : {});
 const GROUP = 4; // 每次請求送幾頁；免費額度是限制「請求次數」，多頁合併可以大幅節省
+// 把這一批的清單列標成「分析中」（只更新樣式，不重畫清單，避免打斷正在編輯的欄位）
+function markWorking(is, group, b) {
+  if (is !== issue()) return;
+  group.forEach(p => {
+    const i = is.pages.indexOf(p), ref = rowRefs[i]; if (!ref) return;
+    ref.row.classList.toggle('ai-working', b.active.has(p.label)); updateRowSummary(i);
+  });
+}
+// 線裝書：葉次有些頁辨識得到、有些頁讀不到。已讀到的頁碼若和影像順序呈固定差距（例如第 2 張是 1、第 4 張是 3），
+// 就把「夾在兩個同差距頁碼之間、還沒有頁碼」的頁依序補上（標為「自動接續」，之後仍可核對、修改）
+function fillPnoByOffset(is) {
+  const P = is.pages, anchors = [];
+  P.forEach((p, i) => { const r = is.rec[p.label]; if (r && r.pnoAi && /^\d+$/.test(p.pno || '')) anchors.push({ i, off: +p.pno - i }); });
+  let n = 0;
+  for (let a = 0; a + 1 < anchors.length; a++) {
+    const x = anchors[a], y = anchors[a + 1];
+    if (x.off !== y.off || y.i - x.i < 2) continue;
+    for (let i = x.i + 1; i < y.i; i++) {
+      const p = P[i], r = is.rec[p.label];
+      if (p.pno) continue;
+      setPno(is, p, String(i + x.off));
+      const rr = r || (is.rec[p.label] = blankRec());
+      rr.pnoAi = false; rr.pnoAuto = true; n++;
+    }
+  }
+  if (n) { recSaveSoon(is); PV.junc = pnoJunctions(is); pvRender({ keepScroll: true }); toast('線裝書：已依葉次的規律補上 ' + n + ' 頁頁碼（標為「自動」，請核對）'); }
+}
 async function runBatch(redo) {
   const is = issue();
   if (PV.batch || !is.id) return;
@@ -171,28 +233,31 @@ async function runBatch(redo) {
   const groups = [];
   const gsz = PV.engine === 'local' ? 2 : GROUP; // 本機 OCR 一次兩頁，進度條走得比較順
   for (let k = 0; k < todo.length; k += gsz) groups.push(todo.slice(k, k + gsz));
-  const b = PV.batch = { is, total: todo.length, done: 0, fail: [], stop: false, error: '', models: new Set() };
+  const b = PV.batch = { is, total: todo.length, done: 0, fail: [], stop: false, error: '', models: new Set(), active: new Set() };
   let next = 0;
   const worker = async () => {
     while (!b.stop && next < groups.length) {
       const g = groups[next++];
+      g.forEach(p => b.active.add(p.label)); markWorking(is, g, b); // 這一批開始：清單上標示「分析中」
       try {
-        const res = await callAnalyze(is, { pages: JSON.stringify(g.map(p => p.label)), mode: 'batch', ...engineParam() });
+        const res = await callAnalyze(is, { pages: JSON.stringify(g.map(p => p.label)), mode: 'batch', ...engineParam(), ...firstParam(is, g) });
         if (res.model) b.models.add(res.model);
         g.forEach(p => { const x = res.pages && res.pages[p.label]; if (x) { const old = is.rec[p.label], nr = toRec(x); carryPnoFlags(old, nr); is.rec[p.label] = nr; applyAiPno(is, p, nr, x.printed_page, res.model); } else b.fail.push(p.label); });
       } catch (e) {
         g.forEach(p => b.fail.push(p.label)); b.error = e.message;
         if (/今天的免費額度|金鑰|尚未設定|API key|PERMISSION|UNAUTHENTICATED|沒有啟動/i.test(e.message)) { b.stop = true; if (/API key|PERMISSION|UNAUTHENTICATED|金鑰無效/i.test(e.message)) openAiDlg('這把金鑰無法使用：' + e.message); }
       }
+      g.forEach(p => { b.active.delete(p.label); PV.flash.add(p.label); }); // 這一批完成：之後重畫時淡淡閃一下
       b.done += g.length; recSaveSoon(is);
-      if (is === issue()) pvRender();
+      if (is === issue()) pvRender({ keepScroll: true });
     }
   };
-  pvRender();
+  pvRender({ keepScroll: true });
   await Promise.all(PV.engine === 'local' ? [worker()] : [worker(), worker()]); // API：同時 2 組，避免超過每分鐘請求數；本機 OCR 吃 CPU，一次一組
   PV.batch = null; recFlush();
+  if (isThread(is) && !b.stop) fillPnoByOffset(is);
   const left = todo.filter(p => !is.rec[p.label]).length;
-  pvRender();
+  pvRender({ keepScroll: true });
   if (b.error && left) toast(b.error + `（尚餘 ${left} 頁，已分析的都已保留，之後可按「繼續分析」）`);
   else toast(b.stop ? '已暫停，之後可按「繼續分析」' : left ? `完成，但有 ${left} 頁失敗，可按「繼續分析」重試` : '整期分析完成，請逐頁核對');
 }// 分析前先問：API（Gemini）或本機 OCR（免費）
@@ -346,10 +411,10 @@ function pvEditor(i) {
     wrap.append(Object.assign(h('div', 'pv-hint full', '這一頁還沒有分析。'), {}));
     const acts = h('div', 'pv-acts full');
     const one = h('button', 'btn primary', '分析這一頁'); one.type = 'button';
-    one.onclick = async () => { one.disabled = true; one.textContent = '辨識中…'; try { is.rec[p.label] = await analyzeOne(is, p); recSaveSoon(is); } catch (e) { toast(e.message); } pvRender(); };
+    one.onclick = async () => { const eng = await askEngine(); if (!eng) return; PV.engine = eng; one.disabled = true; one.textContent = '辨識中…'; aiScan($('pvViewer'), true); try { is.rec[p.label] = await analyzeOne(is, p); recSaveSoon(is); } catch (e) { toast(e.message); } aiScan($('pvViewer'), false); pvRender(); };
     const man = h('button', 'btn', '手動填寫'); man.type = 'button';
     man.onclick = () => { is.rec[p.label] = { ...blankRec(), own: true }; recSaveSoon(is); pvRender({ focus: true }); };
-    const inh = h('button', 'btn', '沿用前頁'); inh.type = 'button';
+    const inh = h('button', 'btn', i === 0 ? '前面沒有標題' : '沿用前頁'); inh.type = 'button';
     inh.onclick = () => { is.rec[p.label] = blankRec(); recSaveSoon(is); pvRender(); };
     acts.append(one, man, inh); wrap.append(acts);
     return wrap;
@@ -357,7 +422,7 @@ function pvEditor(i) {
   const refresh = () => { updateRowSummary(i); };
   if (!r.own) {
     const res = pvResolved(i);
-    wrap.append(h('div', 'pv-hint full', res ? `↳ 這一頁沒有新標題，歸入前面的「${res.title}」。` : '↳ 這一頁沒有新標題，但前面也沒有標題可以沿用。'));
+    wrap.append(h('div', 'pv-hint full', i === 0 ? '這是第一頁，前面沒有任何一頁，沒有標題可以沿用。若這一頁是封面或有標題，請按「這頁有新標題」，或按「重新分析這一頁」讓 AI 判斷是否為封面。' : (res ? `↳ 這一頁沒有新標題，歸入前面的「${res.title}」。` : '↳ 這一頁沒有新標題，但前面也沒有標題可以沿用。')));
   } else {
     const field = (label, key, full) => {
       const f = h('div', 'f' + (full ? ' full' : '') + (r.unsure.includes(key) ? ' unsure' : ''));
@@ -367,7 +432,12 @@ function pvEditor(i) {
       inp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); if (pvConfirm(i)) pvSelect(i + 1); } if (e.key === 'Escape') inp.blur(); };
       const row = h('div', 'fi-row'); row.append(aiPickBtn(key, inp, r, refresh), inp); f.append(lab, row); return f;
     };
-    wrap.append(field('主要題名', 'title', true), field('作者', 'author'), field('專欄名稱', 'column'));
+    const titleField = field('主要題名', 'title', true);
+    const titleInp = titleField.querySelector('input');
+    const candBox = h('div', 'cands'); titleField.append(candBox);
+    const showCands = () => renderCands(candBox, r.cands, () => r.title || '', v => { titleInp.value = v; r.title = v; touch(r); refresh(); });
+    showCands(); titleInp.addEventListener('input', showCands);
+    wrap.append(titleField, field('作者', 'author'), field('專欄名稱', 'column'));
     const adl = h('label', 'f'); const cb = h('input'); cb.type = 'checkbox'; cb.checked = !!r.ad; cb.onchange = () => { r.ad = cb.checked; touch(r); refresh(); };
     adl.style.flexDirection = 'row'; adl.style.alignItems = 'center'; adl.style.gap = '6px'; adl.append(cb, document.createTextNode('廣告／啟事'));
     const rl = field('作者角色（如「譯」）', 'role'); wrap.append(rl, adl);
@@ -385,13 +455,18 @@ function pvEditor(i) {
   const ok = h('button', 'btn primary'); ok.type = 'button'; ok.innerHTML = '確認，下一頁 <kbd>Enter</kbd>';
   ok.onclick = () => { if (pvConfirm(i)) pvSelect(i + 1); };
   const tog = h('button', 'btn', r.own ? '改為沿用前頁' : '這頁有新標題'); tog.type = 'button';
+  tog.hidden = i === 0 && r.own; // 第一頁沒有前一頁，不能改為沿用前頁
   tog.onclick = () => { r.own = !r.own; touch(r); pvRender({ focus: r.own }); };
   acts.append(ok, tog);
   const re = h('button', 'btn', '重新分析這一頁'); re.type = 'button';
   re.onclick = async () => {
+    const eng = await askEngine();   // 先問：API（Gemini）或本機 OCR
+    if (!eng) return;
     if (r.ok && !confirm('這一頁已確認過，重新分析會覆蓋目前的題名、作者等內容。確定重新分析？')) return;
-    re.disabled = true; re.textContent = '辨識中…';
+    PV.engine = eng;
+    re.disabled = true; re.textContent = '辨識中…'; aiScan($('pvViewer'), true);
     try { const nr = await analyzeOne(is, p); is.rec[p.label] = nr; recSaveSoon(is); syncRecToEntry(nr); toast('已重新分析這一頁'); } catch (e) { toast(e.message); }
+    aiScan($('pvViewer'), false);
     pvRender({ focus: true });
   };
   acts.append(re);
@@ -409,9 +484,10 @@ function updateRowSummary(i) {
   const ref = rowRefs[i]; if (!ref) return;
   const r = pvRec()[issue().pages[i].label], s = pvStatus(i), res = pvResolved(i);
   ref.tt.className = 'pv-tt' + (!r ? ' none' : (!r.own ? ' inh' : ''));
-  ref.tt.textContent = !r ? '（尚未分析）' : (r.own ? (r.title || '（請補題名）') : '↳ ' + (res ? res.title : '（前面沒有標題）'));
+  ref.tt.textContent = !r ? '（尚未分析）' : (r.own ? (r.title || '（請補題名）') : (i === 0 ? '（前面沒有標題）' : '↳ ' + (res ? res.title : '（前面沒有標題）')));
   ref.sub.textContent = r && r.own ? ([r.column, r.author, r.ad ? '廣告' : ''].filter(Boolean).join('・') || '—') : '';
-  ref.badge.className = 'badge b-' + s; ref.badge.textContent = ST_LABEL[s];
+  const working = PV.batch && PV.batch.is === issue() && PV.batch.active && PV.batch.active.has(issue().pages[i].label);
+  ref.badge.className = 'badge b-' + (working ? 'working' : s); ref.badge.textContent = working ? '分析中' : ((i === 0 && s === 'inh') ? '無標題' : ST_LABEL[s]);
   const pn = issue().pages[i].pno, fl = pnoFlagged(issue(), i), sg = pnoSuggested(issue(), i); ref.pno.textContent = pn || '—'; ref.pno.className = 'pv-pno' + (pn ? '' : ' none') + (fl ? ' warn' : '') + (r && r.pnoAuto && pn ? ' auto' : '') + (sg ? ' sugg' : ''); if (sg) ref.pno.dataset.sugg = sg; else delete ref.pno.dataset.sugg; ref.pno.title = fl ? `頁碼和前面不連續（照順序應為 ${fl.expected}），可能是辨識錯誤` : pn ? '印在書上的頁碼：' + pn : '沒有頁碼';
   pvProgress();
 }
@@ -437,7 +513,7 @@ function pvRender(opts = {}) {
   $('stRev').textContent = c.review; $('stBad').textContent = '缺題名 ' + c.bad; $('stInh').textContent = c.inh; $('stNone').textContent = '未分析 ' + c.none;
   // 頂端按鈕
   const b = PV.batch && PV.batch.is === is ? PV.batch : null;
-  $('pvStop').hidden = !b; $('pvBatch').disabled = !!b || !n; $('pvBatch').classList.toggle('loading', !!b);
+  $('pvStop').hidden = !b; $('pvBatch').disabled = !!b || !n; $('pvBatch').classList.toggle('loading', !!b); $('app').classList.toggle('batch-running', !!b);
   $('pvBatch').textContent = b ? `分析中 ${b.done}／${b.total}` : (c.none === n ? `分析整期（${n} 頁）` : c.none > 0 ? `繼續分析（尚餘 ${c.none} 頁）` : '重新分析未確認的頁面');
   // 篩選
   const fb = $('pvFilters'); fb.replaceChildren();
@@ -452,19 +528,22 @@ function pvRender(opts = {}) {
   is.pages.forEach((p, i) => {
     const s = pvStatus(i);
     if (PV.filter !== 'all' && s !== PV.filter && !(PV.filter === 'nopno' && !p.pno) && !(PV.filter === 'jump' && pnoFlagged(is, i)) && !(PV.filter === 'sugg' && pnoSuggested(is, i)) && i !== PV.sel) return;
-    const row = h('div', 'pv-row' + (i === PV.sel ? ' sel' : '')); row.dataset.i = i;
+    const working = PV.batch && PV.batch.is === is && PV.batch.active && PV.batch.active.has(p.label);
+    const row = h('div', 'pv-row' + (i === PV.sel ? ' sel' : '') + (working ? ' ai-working' : '') + (PV.flash.has(p.label) ? ' ai-done' : '')); row.dataset.i = i;
     const pg = h('div', 'pv-pg', String(i + 1)); pg.append(h('small', '', pvTail(p.label)));
     const mid = h('div'), tt = h('div', 'pv-tt'), sub = h('div', 'pv-sub'), badge = h('span', 'badge');
     const pno = h('div', 'pv-pno'); mid.append(tt, sub); row.append(pg, pno, mid, badge);
-    rowRefs[i] = { tt, sub, badge, pno }; updateRowSummary(i);
+    rowRefs[i] = { tt, sub, badge, pno, row }; updateRowSummary(i);
     if (i === PV.sel) row.append(pvEditor(i));
     row.onclick = () => pvSelect(i);
     box.append(row);
   });
+  PV.flash.clear();
   pvShowImage();
   const selRow = box.querySelector('.pv-row.sel');
   if (opts.focus && selRow) selRow.querySelector('input[type="text"]')?.focus();
-  if (selRow && !opts.keepScroll) { const r = selRow.getBoundingClientRect(), br = box.getBoundingClientRect(); if (r.top < br.top || r.bottom > br.bottom) selRow.scrollIntoView({ block: 'nearest' }); else box.scrollTop = top; }
+  if (opts.keepScroll) box.scrollTop = top;
+  else if (selRow) { const r = selRow.getBoundingClientRect(), br = box.getBoundingClientRect(); if (r.top < br.top || r.bottom > br.bottom) selRow.scrollIntoView({ block: 'nearest' }); else box.scrollTop = top; }
 }
 
 /* ---------- 套用到篇目目錄 ---------- */
@@ -681,7 +760,7 @@ function startPick(btn, run, vctx) {
 function aiPickBtn(key, inp, r, refresh, vctx) {
   const b = h('button', 'ai-btn'); b.type = 'button';
   b.innerHTML = '<span class="ai-star" aria-hidden="true"></span>';
-  b.title = '框選圖片中的文字，用 AI 辨識後填入這個欄位'; b.setAttribute('aria-label', 'AI 框選辨識');
+  b.title = '框選圖片中的文字，用 AI 辨識後填入這個欄位（本地OCR）'; b.setAttribute('aria-label', 'AI 框選辨識（本地OCR）');
   b.onclick = () => {
     if (PV.pick && PV.pick.btn === b) return cancelPick();
     startPick(b, async b64 => {
@@ -696,6 +775,48 @@ function aiPickBtn(key, inp, r, refresh, vctx) {
 }
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && PV.pick && !PV.pick.busy) cancelPick(); });
 
+/* ---------- 載體編目：刊名欄位旁的 AI 按鈕（分析第一頁封面的標題，當作載體的題名；只用本機 OCR） ---------- */
+function decorateMeta() {
+  const inp = $('metaBody').querySelector('[data-key="刊名"]'); if (!inp) return;
+  const stripCover = t => String(t || '').replace(/-封面$/, '');
+  const row = h('div', 'fi-row'); inp.parentNode.insertBefore(row, inp);
+  const btn = h('button', 'ai-btn'); btn.type = 'button';
+  btn.title = '分析第一頁封面的標題，當作這個載體的題名（本地OCR）'; btn.setAttribute('aria-label', 'AI 分析封面題名（本地OCR）');
+  btn.innerHTML = '<span class="ai-star" aria-hidden="true"></span>';
+  const candBox = h('div', 'cands'); candBox.hidden = true;
+  const setVal = v => { inp.value = v; inp.dispatchEvent(new Event('input', { bubbles: true })); };
+  row.append(btn, inp); row.after(candBox);
+  btn.onclick = async () => {
+    const is = issue();
+    if (!is.id || !is.pages.length) return toast('這一筆資料沒有影像');
+    btn.classList.add('busy', 'on'); btn.disabled = true;
+    try {
+      const res = parse(await api('analyze.php', { book: is.id, page: is.pages[0].label, mode: 'page', engine: 'local', first: '1', ...(isThread(is) ? { thread: '1' } : {}) }), {});
+      const a = (res.articles || [])[0];
+      if (!a || !a.title) { toast('第一頁沒有辨識到封面題名'); return; }
+      setVal(stripCover(a.title));
+      renderCands(candBox, { alts: (a.alts || []).map(stripCover), diff: [] }, () => inp.value, setVal);
+      toast('已填入第一頁封面的題名，請核對');
+    } catch (e) { toast(e.message || String(e)); }
+    finally { btn.classList.remove('busy', 'on'); btn.disabled = false; }
+  };
+}
+/* ---------- 影像預覽：在「編輯頁碼」「自訂範圍」等清單裡點縮圖，放大檢視 ---------- */
+(function () {
+  const dlg = $('imgPreview'), img = $('imgPreviewImg'), stage = $('imgStage');
+  document.addEventListener('click', e => {
+    const t = e.target.closest && e.target.closest('.page-row img'); if (!t) return;
+    e.preventDefault();
+    let label = ''; try { label = new URL(t.src, location.href).searchParams.get('p') || ''; } catch (err) { /* 略過 */ }
+    $('imgPreviewCap').textContent = label ? '影像 ' + label : '影像';
+    stage.classList.remove('zoomed'); stage.scrollTo(0, 0);
+    img.src = t.src;
+    if (!dlg.open) dlg.showModal();
+  });
+  // 點圖片：符合視窗 ⇄ 原始大小（可捲動檢視細節）；點圖片以外的空白處關閉
+  img.addEventListener('click', e => { e.stopPropagation(); stage.classList.toggle('zoomed'); stage.scrollTo(0, 0); });
+  dlg.addEventListener('click', e => { if (e.target === dlg || e.target === stage) dlg.close(); });
+})();
 /* ---------- 側欄（窄螢幕為抽屜） ---------- */
 (function () {
   const open = v => { document.body.classList.toggle('sb-open', v); $('menuToggle').setAttribute('aria-expanded', String(v)); };

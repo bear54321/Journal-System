@@ -19,7 +19,7 @@ natcasesort($books);
   <title>舊版介面｜郭廷以圖書館數位化資料編目工作臺</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.13.2/themes/base/jquery-ui.min.css">
-  <link rel="stylesheet" href="ui.css?v=25">
+  <link rel="stylesheet" href="ui.css?v=31">
   <link rel="stylesheet" href="base.css?v=2">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.13.2/jquery-ui.min.js"></script>

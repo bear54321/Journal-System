@@ -24,6 +24,10 @@ LOCK = threading.Lock()  # onnxruntime session 一次只處理一張，簡單且
 
 
 def run_engine(img, **kw):
+    # RapidOCR 會記住上一次呼叫的 use_det／use_rec 設定，所以每次都明確指定，避免「只辨識不偵測」的呼叫影響後面的整頁辨識
+    kw.setdefault("use_det", True)
+    kw.setdefault("use_cls", True)
+    kw.setdefault("use_rec", True)
     with LOCK:
         r = ENGINE(img, **kw)
     boxes = getattr(r, 'boxes', None)  # 只做辨識（不偵測）時沒有 boxes
@@ -94,7 +98,58 @@ def ocr_bytes(data):
     return text, items
 
 
-def analyze_bytes(data, thread):
+def second_opinion(img, items, raw_title):
+    """把題名那一欄裁出來、放大後重新辨識一次，當作「第二意見」；和第一次不同的字就是有疑問的字。"""
+    key = raw_title.replace(" ", "")
+    for i in items:
+        if i["text"].replace(" ", "") == key:
+            x, y, w, h = int(i["x"]), int(i["y"]), int(i["w"]), int(i["h"])
+            pad = int(0.18 * min(w, h)) + 6
+            H, W = img.shape[:2]
+            crop = img[max(0, y - pad): min(H, y + h + pad), max(0, x - pad): min(W, x + w + pad)]
+            if crop.size == 0:
+                return ""
+            its = run_engine(prepare(crop))
+            return join_reading_order(its)
+    return ""
+
+
+def build_candidates(img, items, res):
+    """題名候選：整句（校正後／原始辨識／第二意見）＋ 逐字有疑問的位置。"""
+    arts = res.get("articles") or []
+    for a in arts:
+        raw = a.pop("raw", None)
+        a.setdefault("alts", [])
+        a.setdefault("diff", [])
+        if a is not arts[0]:
+            continue
+        title = a["title"]
+        second = ""
+        try:
+            second = second_opinion(img, items, raw or title)
+        except Exception:  # noqa: BLE001
+            pass
+        norm = lambda t: t.replace(" ", "")  # noqa: E731
+        alts = []
+        for t in (raw, second):
+            if t and norm(t) != norm(title) and all(norm(t) != norm(x) for x in alts) and analyze_local._is_text(t) and len(t) <= 60:
+                alts.append(t)
+        a["alts"] = alts
+        if " " not in title:
+            same = [title] + [t for t in alts if len(t) == len(title)]
+            diff = []
+            for pos in range(len(title)):
+                chars = []
+                for t in same:
+                    if t[pos] not in chars:
+                        chars.append(t[pos])
+                if len(chars) > 1:
+                    diff.append({"i": pos, "chars": chars})
+            a["diff"] = diff[:8]
+    return res
+
+
+def analyze_bytes(data, thread, first=False):
     """整頁分析：OCR 後用規則推測篇目與頁碼（粗略，結果需人工核對）。"""
     img = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
     if img is None:
@@ -105,7 +160,15 @@ def analyze_bytes(data, thread):
         img = cv2.resize(img, (int(w * k), int(h * k)), interpolation=cv2.INTER_AREA)
         h, w = img.shape[:2]
     items = run_engine(img)
-    return analyze_local.analyze(items, w, h, thread)
+    res = analyze_local.analyze(items, w, h, thread, first)
+    res = build_candidates(img, items, res)
+    if thread and not res.get("printed_page"):
+        # 線裝書：版心上的葉次很小，一般文字偵測常漏掉，另外用版面位置去找
+        try:
+            res["printed_page"] = analyze_local.leaf_number(img, items, lambda c: [i["text"] for i in run_engine(c, use_det=False, use_cls=False, use_rec=True)])
+        except Exception:  # noqa: BLE001
+            pass
+    return res
 
 
 def toc_bytes(data, thread):
@@ -149,7 +212,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, json.dumps(toc_bytes(data, thread), ensure_ascii=False))
             elif u.path == "/analyze":
                 thread = parse_qs(u.query).get("thread", ["0"])[0] == "1"
-                self._send(200, json.dumps(analyze_bytes(data, thread), ensure_ascii=False))
+                first = parse_qs(u.query).get("first", ["0"])[0] == "1"
+                self._send(200, json.dumps(analyze_bytes(data, thread, first), ensure_ascii=False))
             else:
                 text, items = ocr_bytes(data)
                 self._send(200, json.dumps({"text": text, "items": items}, ensure_ascii=False))

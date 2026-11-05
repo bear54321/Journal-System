@@ -39,14 +39,14 @@ if (($_POST['engine'] ?? '') === 'local' && in_array($_POST['mode'] ?? 'page', [
   if (!is_array($llabels) || !$llabels || count($llabels) > 8) out('pages 需為 1–8 張影像編號', 400);
   $lthread = (($_POST['thread'] ?? '') === '1') ? '1' : '0';
   $lout = [];
-  foreach ($llabels as $l) {
+  foreach (array_values($llabels) as $lk => $l) {
     $l = (string)$l;
     if (!isset($limgs[$l])) out('找不到影像：' . $l, 400);
     $bytes = @file_get_contents(img_dir($lbook) . DIRECTORY_SEPARATOR . $limgs[$l]);
     if ($bytes === false || $bytes === '') out('讀不到影像：' . $l, 500);
     $resp = false; $code = 0;
     for ($try = 0; $try < 5; $try++) { // 服務剛啟動時模型還在載入：連不上就等一下再試
-      $ch = curl_init(OCR_LOCAL_URL . $lpath . '?thread=' . $lthread);
+      $ch = curl_init(OCR_LOCAL_URL . $lpath . '?thread=' . $lthread . '&first=' . ((($_POST['first'] ?? '') === '1' && $lk === 0) ? '1' : '0'));
       curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => $bytes, CURLOPT_HTTPHEADER => ['Content-Type: application/octet-stream'], CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 3, CURLOPT_TIMEOUT => 180]);
       $resp = curl_exec($ch); $code = curl_getinfo($ch, CURLINFO_RESPONSE_CODE); curl_close($ch);
       if ($resp !== false && $code !== 0) break;
@@ -62,7 +62,7 @@ if (($_POST['engine'] ?? '') === 'local' && in_array($_POST['mode'] ?? 'page', [
     }
     $arts = [];
     foreach (($j['articles'] ?? []) as $a) {
-      $arts[] = ['title' => (string)($a['title'] ?? ''), 'column_name' => (string)($a['column_name'] ?? ''), 'author' => (string)($a['author'] ?? ''), 'author_role' => (string)($a['author_role'] ?? ''), 'is_ad' => false, 'uncertain' => []];
+      $arts[] = ['title' => (string)($a['title'] ?? ''), 'column_name' => (string)($a['column_name'] ?? ''), 'author' => (string)($a['author'] ?? ''), 'author_role' => (string)($a['author_role'] ?? ''), 'is_ad' => false, 'uncertain' => [], 'alts' => array_values(array_map('strval', (array)($a['alts'] ?? []))), 'diff' => (array)($a['diff'] ?? [])];
     }
     $lout[$l] = ['articles' => $arts, 'printed_page' => normalize_page($j['printed_page'] ?? ''), 'printed_raw' => (string)($j['printed_page'] ?? '')];
   }
@@ -91,6 +91,7 @@ if (($_POST['mode'] ?? '') === 'test') {
 $book = get_book();
 $mode = in_array($_POST['mode'] ?? '', ['toc', 'batch', 'ocr'], true) ? $_POST['mode'] : 'page';
 $thread = (($_POST['thread'] ?? '') === '1'); // 線裝書模式：頁碼以中縫（版心）為主
+$first = (($_POST['first'] ?? '') === '1');   // 這次的第一張影像是整本資料的第一頁（用來判斷封面）
 $images = list_images($book);
 
 $labels = [];
@@ -102,6 +103,45 @@ if ($mode === 'batch') {
   $labels = $mode === 'ocr' ? [] : [isset($_POST['page']) ? (string)$_POST['page'] : '']; // ocr：前端框選的小圖，不對應整張影像
 }
 foreach ($labels as $l) if (!isset($images[$l])) out('找不到影像：' . $l, 400);
+
+// Gemini 的結果沒有「候選」：用本機 OCR（如果服務有開）重讀一次這張影像，把它讀到的標題當成候選，讓使用者可以點選替換
+function add_local_cands(&$arts, $path, $thread, $first) {
+  if (!$arts || !function_exists('curl_init') || !is_file($path)) return;
+  $title = (string)($arts[0]['title'] ?? '');
+  if ($title === '') return;
+  $bytes = @file_get_contents($path);
+  if ($bytes === false || $bytes === '') return;
+  $ch = curl_init(OCR_LOCAL_URL . '/analyze?thread=' . ($thread ? '1' : '0') . '&first=' . ($first ? '1' : '0'));
+  curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => $bytes, CURLOPT_HTTPHEADER => ['Content-Type: application/octet-stream'], CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 1, CURLOPT_TIMEOUT => 60]);
+  $resp = curl_exec($ch); $code = curl_getinfo($ch, CURLINFO_RESPONSE_CODE); curl_close($ch);
+  if ($resp === false || $code !== 200) return;
+  $j = json_decode($resp, true);
+  if (!is_array($j)) return;
+  $norm = function ($t) { return str_replace(' ', '', (string)$t); };
+  $alts = [];
+  foreach (($j['articles'] ?? []) as $la) {
+    foreach (array_merge([$la['title'] ?? ''], (array)($la['alts'] ?? [])) as $t) {
+      $t = (string)$t;
+      if ($t === '' || $norm($t) === $norm($title)) continue;
+      foreach ($alts as $x) if ($norm($x) === $norm($t)) continue 2;
+      $alts[] = $t;
+    }
+  }
+  $alts = array_slice($alts, 0, 6);
+  $diff = [];
+  if (strpos($title, ' ') === false) {
+    $tc = preg_split('//u', $title, -1, PREG_SPLIT_NO_EMPTY);
+    $same = [$tc];
+    foreach ($alts as $a) { $ac = preg_split('//u', $a, -1, PREG_SPLIT_NO_EMPTY); if (count($ac) === count($tc)) $same[] = $ac; }
+    for ($p = 0; $p < count($tc); $p++) {
+      $chars = [];
+      foreach ($same as $c) if (!in_array($c[$p], $chars, true)) $chars[] = $c[$p];
+      if (count($chars) > 1) $diff[] = ['i' => $p, 'chars' => $chars];
+    }
+  }
+  $arts[0]['alts'] = $alts;
+  $arts[0]['diff'] = array_slice($diff, 0, 8);
+}
 
 // 頁碼一律轉成阿拉伯數字字串：「二十一」→21、「廿三」→23、「iv」→4、「（15）」→15；沒有或看不懂就回傳空字串
 function normalize_page($s) {
@@ -185,6 +225,8 @@ $pageRules = "- 只列這一頁上「開頭」的文章或廣告（有標題的�
 
 // 線裝書：頁碼印在書葉中央的中縫（版心），不是版面邊緣。影像常是左右攤開的跨頁，頁碼在兩半之間
 if ($thread) $pageRules .= "- 【線裝書】這一本的頁碼不是印在版面邊緣，而是在書葉中央的中縫（版心）上，通常與書名、卷次、魚尾符號一起，為直排小字（例如「卷二　十五」或單獨的「十五」）。影像可能是左右攤開的跨頁，兩半之間的中縫就是版心。printed_page 請以版心上的頁（葉）次數字為準（本條優先於上一條關於版面邊緣的說明）；卷次不是頁碼；版心上看不到、被書口遮住或太模糊就留空字串，不要讀內文裡的數字。影像外緣角落（左下、右下）旋轉的小數字（例如「13」「14」）是面次，不是頁碼，請忽略。\n";
+if ($thread) $pageRules .= "- 【線裝書的題名】title 要填「文章開頭的完整標題行」：它通常印在書葉最右側第一欄的最上方，字數較多（例如「法理學大家孟德斯鳩之學說」），要整行完整抄寫，不能只抄一部分，也不要把內文第一句併進去。版心（書葉中央的縫）上的文字（例如「孟德斯鳩學說」）只是書名或篇名的簡稱，不是這一頁的完整題名；只有在這一頁完全找不到標題行時，才可以拿版心文字當題名。若有多個標題（例如章與節），照由右到左、由上到下的順序各列一筆。\n";
+if ($first) $pageRules .= "- 【封面判斷】這一批的第 1 張影像是整本資料的第一頁，前面沒有任何一頁，所以不可能沿用前頁。若它是封面（內容主要是書名、刊名、期數、作者、出版資訊，沒有文章內容），articles 只回傳一筆：title 填「封面上的主要題名-封面」（例如「新民叢報彙編卷一-封面」），其他欄位留空，封面上的其他文字不要另外列出。若它不是封面（直接就是目錄或文章），照一般規則辨識。\n";
 
 $edge = $thread ? max(ANALYZE_MAX_EDGE, 2400) : ANALYZE_MAX_EDGE; // 中縫的字很小，線裝書用較高解析度
 $parts = [];
@@ -300,6 +342,7 @@ $clean = function (&$rows) use ($book) {
   unset($row);
 };
 if (isset($result['articles'])) $clean($result['articles']);
+if ($mode === 'page' && isset($result['articles'])) add_local_cands($result['articles'], img_dir($book) . DIRECTORY_SEPARATOR . $images[$labels[0]], $thread, $first);
 if (isset($result['entries'])) $clean($result['entries']);
 if ($mode === 'ocr') $result['text'] = trim(str_replace(["\r", "\n"], '', (string)($result['text'] ?? '')));
 if (isset($result['printed_page'])) $result['printed_page'] = normalize_page($result['printed_page']);
@@ -312,6 +355,9 @@ if ($mode === 'batch') {
     $clean($a);
     $byLabel[$labels[$i]] = ['articles' => $a, 'printed_page' => normalize_page($p['printed_page'] ?? ''), 'printed_raw' => (string)($p['printed_page'] ?? '')];
   }
+  $kk = 0;
+  foreach ($byLabel as $lb => &$pg) { add_local_cands($pg['articles'], img_dir($book) . DIRECTORY_SEPARATOR . $images[$lb], $thread, $first && $kk === 0); $kk++; }
+  unset($pg);
   $result = ['pages' => (object)$byLabel];
 }
 $result['model'] = $usedModel;

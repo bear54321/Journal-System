@@ -248,7 +248,7 @@ function showError(msg) {
 // 一開始輸入就清除錯誤標示（即時回饋）
 ['fTitle', 'fPage1', 'fPage2'].forEach(id => $(id).addEventListener('input', () => { $(id).classList.remove('invalid'); if (!$('formError').hidden) $('formError').hidden = true; }));
 function resetForm() {
-  editingId = null; pageTouched = false;
+  editingId = null; pageTouched = false; if (typeof showTitleCands === 'function') showTitleCands(null);
   ['fTitle', 'fColumn', 'fAuthor', 'fRole'].forEach(id => { $(id).value = ''; });
   $('fAd').checked = false;
   pickedList = [];
@@ -259,7 +259,7 @@ function resetForm() {
   $('editingTag').hidden = true; if ($('formSum')) $('formSum').textContent = '';
 }
 function loadForm(n) {
-  editingId = n.id; pageTouched = true;
+  editingId = n.id; pageTouched = true; showTitleCands(null);
   $('fTitle').value = n.title; $('fColumn').value = n.column; $('fAd').checked = n.ad;
   $('fAuthor').value = n.author; $('fRole').value = n.role;
   $('fPage1').value = n.page1; $('fPage2').value = n.page2;
@@ -451,7 +451,7 @@ function renderTree() {
       const head = make('div', 'root-head' + (rootCollapsed ? ' collapsed' : ''));
       head.setAttribute('role', 'button'); head.tabIndex = 0;
       head.setAttribute('aria-expanded', String(!rootCollapsed));
-      head.title = '最上層：雜誌編目的刊名（只用來顯示，不會存進篇目資料）。點一下可收合全部篇目。';
+      head.title = '最上層：載體編目的刊名（只用來顯示，不會存進篇目資料）。點一下可收合全部篇目。';
       head.append(make('span', 'root-arrow', rootCollapsed ? '▶' : '▼'), make('span', 'root-name', bookName), make('span', 'kid-count', cnt + ' 筆'));
       const flip = () => { rootCollapsed = !rootCollapsed; renderTree(); };
       head.onclick = flip; head.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(); } };
@@ -527,12 +527,12 @@ function buildMeta() {
   });
   field('刊名').addEventListener('input', e => { field('報刊名第一字').value = [...e.target.value.trim()][0] || ''; });
 }
-$('openMeta').onclick = () => { if (!issue().id) return toast('請先選擇期刊'); buildMeta(); $('metaDlg').showModal(); };
+$('openMeta').onclick = () => { if (!issue().id) return toast('請先選擇期刊'); buildMeta(); if (typeof decorateMeta === 'function') decorateMeta(); $('metaDlg').showModal(); };
 $('metaSave').onclick = () => {
   const is = issue(), meta = { ...is.meta };
   $('metaBody').querySelectorAll('[data-key]').forEach(c => { meta[c.dataset.key] = c.value.trim(); });
   api('saveMeta.php', { book: is.id, meta: JSON.stringify(meta) })
-    .then(() => { is.meta = meta; $('metaDlg').close(); toast('已存檔雜誌編目'); renderTree(); })
+    .then(() => { is.meta = meta; $('metaDlg').close(); toast('已存檔載體編目'); renderTree(); })
     .catch(e => toast('存檔失敗：' + e.message));
 };
 
@@ -606,18 +606,27 @@ async function analyzeCurrent(mode, btn) {
   if (!eng) return null;
   const label = btn.textContent;
   document.querySelectorAll('#aiPage,#aiToc').forEach(b => { b.disabled = true; });
-  btn.textContent = '辨識中…'; btn.classList.add('loading');
+  btn.textContent = '辨識中…'; btn.classList.add('loading'); aiScan($('viewer'), true);
   toast(eng === 'local' ? '本機 OCR 辨識中，請稍候…' : 'AI 辨識中，請稍候…');
   try {
     const params = { book: is.id, page: p.label, mode };
     if (eng === 'local') { params.engine = 'local'; if (isThread(is)) params.thread = '1'; }
+    if (mode === 'page' && is.pages.length && p.label === is.pages[0].label) params.first = '1';
     return parse(await api('analyze.php', params), null);
   }
   catch (e) { toast('辨識失敗：' + e.message); return null; }
-  finally { btn.textContent = label; btn.classList.remove('loading'); document.querySelectorAll('#aiPage,#aiToc').forEach(b => { b.disabled = false; }); }
+  finally { aiScan($('viewer'), false); btn.textContent = label; btn.classList.remove('loading'); document.querySelectorAll('#aiPage,#aiToc').forEach(b => { b.disabled = false; }); }
 }
 
+function showTitleCands(a) {
+  const box = $('titleCands'); if (!box || typeof renderCands !== 'function') return;
+  const cands = a ? { alts: a.alts || [], diff: a.diff || [] } : null;
+  const setVal = v => { $('fTitle').value = v; };
+  window.__titleCands = cands;
+  renderCands(box, cands, () => $('fTitle').value, setVal);
+}
 function fillFromArticle(a) {
+  showTitleCands(a);
   $('fTitle').value = a.title || ''; $('fColumn').value = a.column_name || ''; $('fAd').checked = !!a.is_ad;
   $('fAuthor').value = a.author || ''; $('fRole').value = a.author_role || '';
   showError('');

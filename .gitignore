@@ -20,3 +20,5 @@ ocr/server.log
 ocr/get-pip.py
 
 ocr/__pycache__/
+
+ocr/php-server.log

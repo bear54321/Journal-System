@@ -643,3 +643,69 @@ kbd { font-size: 12px; }
 .tree.under-root::before { content: ""; position: absolute; left: -16px; top: -8px; bottom: 22px; width: 2px; background: var(--accent); opacity: .45; border-radius: 1px; }
 .tree.under-root > li::before { content: ""; position: absolute; left: -16px; top: 22px; width: 14px; height: 2px; background: var(--accent); opacity: .45; border-radius: 1px; }
 .tree.under-root[hidden] { display: none; }
+
+/* AI 辨識中：影像檢視器的彩虹光環與掃描光帶 */
+.ai-scan { position: absolute; inset: 0; z-index: 2; pointer-events: none; opacity: 0; transition: opacity .4s ease; overflow: hidden; border-radius: inherit; }
+.ai-scan.on { opacity: 1; }
+.ai-scan::before, .ai-scan::after { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 6px; pointer-events: none;
+  background: conic-gradient(from var(--ai-ang), #ff5f6d, #ffb347, #ffe066, #47d1a4, #4facfe, #a56cff, #ff5f6d);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  animation: ai-rot 2.6s linear infinite; }
+.ai-scan::after { padding: 26px; filter: blur(18px); opacity: .8; }
+.ai-sweep { position: absolute; left: 0; right: 0; height: 34%; top: -34%; pointer-events: none;
+  background: linear-gradient(180deg, transparent, rgba(255, 95, 109, .10) 25%, rgba(255, 179, 71, .22) 40%, rgba(71, 209, 164, .22) 55%, rgba(79, 172, 254, .22) 70%, rgba(165, 108, 255, .12) 85%, transparent);
+  animation: ai-sweep-y 2.2s ease-in-out infinite; }
+@keyframes ai-sweep-y { 0% { top: -34%; } 100% { top: 100%; } }
+.pv-viewer.ai-busy img, .viewer.ai-busy img { filter: brightness(.94) saturate(1.08); transition: filter .4s; }
+
+/* 整期分析進行中：按鈕彩虹細邊、進度條光澤、正在處理的清單列（克制的 AI 動態） */
+.app.batch-running #pvBatch { position: relative; opacity: 1 !important; background: var(--accent-hover); border-color: transparent; box-shadow: 0 0 14px rgba(140, 110, 255, .4); }
+.app.batch-running #pvBatch::after { content: ""; position: absolute; inset: -3px; border-radius: 13px; padding: 2px; pointer-events: none;
+  background: conic-gradient(from var(--ai-ang), #ff5f6d, #ffb347, #ffe066, #47d1a4, #4facfe, #a56cff, #ff5f6d);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  animation: ai-rot 2.2s linear infinite; }
+.app.batch-running .stat .pv-prog { position: relative; overflow: hidden; }
+.app.batch-running .stat .pv-prog::after { content: ""; position: absolute; top: 0; bottom: 0; left: -40%; width: 40%; pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(255, 95, 109, .6), rgba(255, 179, 71, .65), rgba(71, 209, 164, .65), rgba(79, 172, 254, .65), rgba(165, 108, 255, .55), transparent);
+  animation: prog-sheen 1.6s linear infinite; }
+@keyframes prog-sheen { to { left: 100%; } }
+.pv-row.ai-working { position: relative; overflow: hidden; }
+.pv-row.ai-working::after { content: ""; position: absolute; inset: 0; pointer-events: none; background-size: 260% 100%;
+  background-image: linear-gradient(100deg, transparent 32%, rgba(79, 172, 254, .12) 42%, rgba(165, 108, 255, .15) 50%, rgba(255, 95, 109, .12) 58%, transparent 68%);
+  animation: row-shimmer 1.9s linear infinite; }
+@keyframes row-shimmer { from { background-position: 160% 0; } to { background-position: -60% 0; } }
+.pv-row.ai-done { animation: row-done 1.5s ease-out 1; }
+@keyframes row-done { 0% { background: rgba(71, 209, 164, .28); } 100% { background: transparent; } }
+.b-working { background: var(--accent-soft); color: var(--accent); }
+.b-working::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 6px; animation: dot-pulse 1s ease-in-out infinite; }
+@keyframes dot-pulse { 50% { opacity: .25; transform: scale(.7); } }
+
+/* 整期分析進行中：影像區外緣只加一條很細、很慢的彩虹線（不干擾核對） */
+.app.batch-running .pv-viewer::after { content: ""; position: absolute; inset: 0; z-index: 2; pointer-events: none; border-radius: inherit; padding: 2px; opacity: .85;
+  background: conic-gradient(from var(--ai-ang), #ff5f6d, #ffb347, #ffe066, #47d1a4, #4facfe, #a56cff, #ff5f6d);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  animation: ai-rot 5s linear infinite; }
+.app.batch-running .pv-viewer::after { padding: 5px; opacity: 1; animation-duration: 4s; }
+
+/* 題名候選：整句與逐字 */
+.cands { display: flex; flex-direction: column; gap: 6px; margin-top: 2px; }
+.cands[hidden] { display: none; }
+.cand-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.cand-label { font-size: 12px; font-weight: 600; color: var(--fg-3); margin-right: 2px; white-space: nowrap; }
+.cand-chip { border: 1px solid var(--line-strong); background: var(--surface); color: var(--fg); border-radius: 999px; padding: 3px 12px; font-size: 14px; cursor: pointer; transition: all var(--dur); max-width: 100%; text-align: left; }
+.cand-chip:hover { border-color: var(--accent); background: var(--accent-soft); }
+.cand-chip.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 600; }
+.cand-chip.cand-char { min-width: 34px; text-align: center; padding: 3px 8px; font-size: 16px; background: var(--warn-soft); border-color: transparent; }
+.cand-chip.cand-char.on { background: var(--accent); color: var(--accent-fg); }
+
+/* 影像預覽（點縮圖放大） */
+.page-row img { cursor: zoom-in; transition: transform var(--dur), box-shadow var(--dur); }
+.page-row img:hover { transform: scale(1.03); box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
+dialog.img-preview { width: min(1100px, calc(100vw - 24px)); height: min(92vh, 1000px); max-height: none; background: var(--surface); }
+.img-bar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.img-cap { font-family: var(--mono); font-size: 13px; color: var(--fg-2); }
+.img-stage { flex: 1 1 auto; min-height: 0; overflow: auto; display: grid; place-items: center; background: var(--stage); padding: 12px; }
+.img-stage img { max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; box-shadow: 0 8px 32px rgba(0, 0, 0, .45); }
+.img-stage.zoomed { display: block; }
+.img-stage.zoomed img { max-width: none; max-height: none; cursor: zoom-out; }
+@media (max-width: 899px) { #imgPreviewHint { display: none; } }
