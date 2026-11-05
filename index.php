@@ -20,6 +20,8 @@ natcasesort($books);
 <title>郭廷以圖書館數位化資料編目工作臺</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="ui.css?v=31">
+<link rel="stylesheet" href="theme.css?v=3">
+<script src="theme.js?v=1"></script>
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs><linearGradient id="aiGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff5f6d"/><stop offset=".3" stop-color="#ffb347"/><stop offset=".55" stop-color="#47d1a4"/><stop offset=".78" stop-color="#4facfe"/><stop offset="1" stop-color="#a56cff"/></linearGradient></defs></svg>
@@ -63,6 +65,10 @@ natcasesort($books);
         <button class="btn" id="pvApply" type="button" title="把逐頁資料合併成篇目目錄（連續同題名的頁會併成一筆）">套用到篇目目錄</button>
         <button class="btn" id="pvStop" type="button" hidden>暫停</button>
         <button class="btn primary" id="pvBatch" type="button">分析整期</button>
+      </div>
+      <div class="theme-switch" role="group" aria-label="外觀">
+        <button type="button" data-theme-set="light" aria-pressed="false" title="白底版型" aria-label="白底版型"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><span>白底</span></button>
+        <button type="button" data-theme-set="dark" aria-pressed="true" title="黑底版型" aria-label="黑底版型"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg><span>黑底</span></button>
       </div>
     </header>
 

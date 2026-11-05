@@ -1,0 +1,95 @@
+/* =====================================================================
+   儀表板風格主題（疊在 ui.css 之後載入，只覆寫 token 與少數外觀）
+   深色：深海藍底 + 青色（cyan）強調；淺色：白底 + 同一套青色。
+   切換：<html data-theme="dark|light">，由 theme.js 控制並記在 localStorage。
+   用 html:root[...] 提高權重，才能蓋過 ui.css 的 prefers-color-scheme 區塊。
+   ===================================================================== */
+
+html:root[data-theme="dark"] {
+  --accent: #18b8dc;  --accent-hover: #3bcdea;  --accent-fg: #03202a;
+  --accent-soft: rgba(24, 184, 220, .14);  --accent-ring: rgba(24, 184, 220, .38);
+  --bg: #091324;  --surface: #0e1c33;  --surface-2: #122340;  --sunken: #0b172b;  --glass: rgba(9, 19, 36, .82);
+  --fg: #e9f0fa;  --fg-2: #92a4bb;  --fg-3: #62768f;
+  --line: #1a2c49;  --line-strong: #263d60;
+  --ok: #2fd47a;  --ok-soft: rgba(47, 212, 122, .14);
+  --warn: #f5a524;  --warn-soft: rgba(245, 165, 36, .15);
+  --danger: #ff7a7a;  --danger-soft: rgba(255, 122, 122, .15);
+  --neutral: #92a4bb;  --neutral-soft: rgba(146, 164, 187, .14);
+  --stage: #060d1a;  --flash: rgba(24, 184, 220, .28);
+  --sh-1: 0 0 0 1px rgba(255, 255, 255, .02), 0 1px 2px rgba(0, 0, 0, .25);
+  --sh-2: 0 16px 48px rgba(0, 0, 0, .55);
+  --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5l3 3 3-3' fill='none' stroke='%2392a4bb' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --logo-grad: linear-gradient(135deg, #22d3ee, #0891b2);
+  --page-glow: radial-gradient(900px 420px at 85% -10%, rgba(24, 184, 220, .10), transparent 70%);
+  color-scheme: dark;
+}
+
+html:root[data-theme="light"] {
+  --accent: #0891b2;  --accent-hover: #0e7490;  --accent-fg: #ffffff;
+  --accent-soft: rgba(8, 145, 178, .10);  --accent-ring: rgba(8, 145, 178, .28);
+  --bg: #f3f7fb;  --surface: #ffffff;  --surface-2: #f8fbfd;  --sunken: #eef3f8;  --glass: rgba(255, 255, 255, .85);
+  --fg: #0f1e35;  --fg-2: #56677f;  --fg-3: #8696ab;
+  --line: #e2eaf3;  --line-strong: #cbd8e6;
+  --ok: #178a4c;  --ok-soft: rgba(23, 138, 76, .11);
+  --warn: #b45f06;  --warn-soft: rgba(217, 119, 6, .13);
+  --danger: #d1242f;  --danger-soft: rgba(209, 36, 47, .09);
+  --neutral: #56677f;  --neutral-soft: rgba(86, 103, 127, .11);
+  --stage: #1a2740;  --flash: rgba(255, 204, 0, .38);
+  --sh-1: 0 1px 2px rgba(15, 30, 53, .05), 0 1px 1px rgba(15, 30, 53, .03);
+  --sh-2: 0 14px 40px rgba(15, 30, 53, .14), 0 2px 8px rgba(15, 30, 53, .05);
+  --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5l3 3 3-3' fill='none' stroke='%2356677f' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --logo-grad: linear-gradient(135deg, #22d3ee, #0891b2);
+  --page-glow: radial-gradient(900px 420px at 85% -10%, rgba(8, 145, 178, .08), transparent 70%);
+  color-scheme: light;
+}
+
+/* ---- 共通外觀：圓角更大、卡片像儀表板 ---- */
+html:root { --r-md: 14px; --r-lg: 18px; }
+body { background: var(--bg) var(--page-glow) no-repeat; transition: background-color .2s, color .2s; }
+.sidebar, .card, .stat, .sb-card, .btn, input[type="text"], input[type="password"], select, textarea {
+  transition: background-color .2s, border-color .2s, color .2s, box-shadow .2s;
+}
+.sidebar { background: var(--surface); border-right: 1px solid var(--line); }
+.logo, .sb-brand .logo { background: var(--logo-grad); color: #fff; box-shadow: 0 6px 18px -6px var(--accent-ring); }
+.card, .stat { border-color: var(--line); }
+.stat-v { letter-spacing: -.01em; }
+
+/* 側欄項目：目前頁面用實心青色方塊（仿範例的 active icon） */
+.sb-item { border-radius: 12px; }
+.sb-item[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); box-shadow: 0 6px 16px -8px var(--accent-ring); }
+.sb-item[aria-pressed="true"] .icon { stroke: currentColor; }
+.sb-item:hover:not([aria-pressed="true"]) { background: var(--accent-soft); color: var(--fg); }
+
+/* 主按鈕：青色 */
+.btn { border-radius: 10px; }
+.btn.primary { box-shadow: 0 6px 16px -8px var(--accent-ring); }
+.page-head { border-bottom-color: var(--line); }
+
+/* ---- 右上角：外觀切換（淺色 / 深色） ---- */
+.theme-switch {
+  display: inline-flex; align-items: center; gap: 2px; padding: 3px; margin-left: 4px;
+  background: var(--sunken); border: 1px solid var(--line-strong); border-radius: 999px;
+}
+.theme-switch button {
+  display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 13px;
+  border: 0; border-radius: 999px; background: transparent; color: var(--fg-2);
+  font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  transition: background-color .16s, color .16s, box-shadow .16s;
+}
+.theme-switch button:hover { color: var(--fg); }
+.theme-switch button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); box-shadow: 0 4px 12px -6px var(--accent-ring); }
+.theme-switch button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-switch svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+@media (max-width: 899px) { .theme-switch button span { display: none; } .theme-switch button { padding: 0 10px; } }
+
+/* 標題、動作鈕、切換鈕同一行：標題靠左，其餘靠右；切換鈕縮成純圖示 */
+.page-head { align-items: center; flex-wrap: nowrap; gap: 12px; padding-bottom: 10px; }
+.page-head .ph-title { flex: 1 1 auto; min-width: 0; }
+.page-head .ph-title h1 { font-size: 22px; }
+.page-head .spacer { display: none; }
+.page-head .head-actions { order: 1; flex: 0 1 auto; justify-content: flex-end; min-width: 0; }
+.page-head .theme-switch { order: 2; margin-left: 0; flex: none; }
+.theme-switch button { padding: 0; width: 32px; justify-content: center; }
+.theme-switch button span { display: none; }
+.content { padding-top: 14px; gap: 14px; }
+@media (max-width: 1199px) { .page-head { flex-wrap: wrap; } .page-head .head-actions { order: 3; flex: 1 0 100%; } }
