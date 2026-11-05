@@ -22,7 +22,7 @@ function pvStatus(i) {
   if (!r.title) return 'bad';
   return r.ok ? 'ok' : 'review';
 }
-const blankRec = () => ({ own: false, title: '', column: '', author: '', role: '', ad: false, ok: false, unsure: [], more: [], ai: null, pnoAi: false, pnoAuto: false });
+const blankRec = () => ({ own: false, title: '', column: '', author: '', role: '', ad: false, ok: false, unsure: [], more: [], ai: null, pnoAi: false, pnoAuto: false, pnoSuggest: '' });
 
 /* ---------- 頁碼：印在書上的頁碼，統一存阿拉伯數字（和「編輯頁碼」是同一份資料 pages[].pno） ---------- */
 // 回傳阿拉伯數字字串；空白回傳 ''；看不懂回傳 null。「二十一」→21、「廿三」→23、「iv」→4、「（15）」→15
@@ -65,11 +65,21 @@ async function pnoFlush() {
 window.addEventListener('beforeunload', () => { pnoFlush(); });
 function setPno(is, p, value) { p.pno = value; pnoSaveSoon(is, p.label, value); }
 // AI 辨識的頁碼只填空白的頁，不會蓋掉已經有的（可能是人工填的）
+// 重新分析會換掉整筆紀錄，先把舊紀錄裡「頁碼是誰填的」的旗標帶過來
+function carryPnoFlags(old, rec) { if (old) { rec.pnoAi = old.pnoAi; rec.pnoAuto = old.pnoAuto; } }
+// AI 辨識到的頁碼：這頁還沒有頁碼就直接填；已經有不同的頁碼（而且還沒確認）就不覆蓋，列為「AI 建議」讓使用者決定
 function applyAiPno(is, p, rec, printed, model) {
-  if (/lite/i.test(model || '')) return; // lite 模型的頁碼常是推算出來的，不採用
   const n = normalizePageNo(printed);
-  if (n && !p.pno) { setPno(is, p, n); rec.pnoAi = true; }
+  if (!n) return;
+  if (/lite/i.test(model || '') && !isThread(is)) return; // lite 在一般書上的頁碼常是推算的；線裝書讀中縫時實測可用
+  if (!p.pno) { setPno(is, p, n); rec.pnoAi = true; rec.pnoSuggest = ''; return; }
+  if (p.pno !== n && !rec.ok) rec.pnoSuggest = n;
 }
+function pnoSuggested(is, i) {
+  const p = is.pages[i], r = is.rec[p.label];
+  return r && r.pnoSuggest && r.pnoSuggest !== p.pno && !r.ok ? r.pnoSuggest : '';
+}
+const suggCount = () => { const is = issue(); return is.pages.filter((p, i) => pnoSuggested(is, i)).length; };
 
 /* ---------- 頁碼連續性檢查：AI 把直排「二〇」讀成「110」這類錯誤，會讓頁碼突然跳號 ---------- */
 // 兩個有數字頁碼的頁之間，頁碼差應該等於頁數差（中間的空白頁也算一頁），不符就是「不連續」
@@ -149,7 +159,7 @@ async function callAnalyze(is, params) {
     }
   }
 }
-const analyzeOne = async (is, p) => { const res = await callAnalyze(is, { page: p.label, mode: 'page' }); const r = toRec(res); applyAiPno(is, p, r, res.printed_page, res.model); return r; };
+const analyzeOne = async (is, p) => { const res = await callAnalyze(is, { page: p.label, mode: 'page' }); const r = toRec(res); carryPnoFlags(is.rec[p.label], r); applyAiPno(is, p, r, res.printed_page, res.model); return r; };
 
 const GROUP = 4; // 每次請求送幾頁；免費額度是限制「請求次數」，多頁合併可以大幅節省
 async function runBatch(redo) {
@@ -167,7 +177,7 @@ async function runBatch(redo) {
       try {
         const res = await callAnalyze(is, { pages: JSON.stringify(g.map(p => p.label)), mode: 'batch' });
         if (res.model) b.models.add(res.model);
-        g.forEach(p => { const x = res.pages && res.pages[p.label]; if (x) { is.rec[p.label] = toRec(x); applyAiPno(is, p, is.rec[p.label], x.printed_page, res.model); } else b.fail.push(p.label); });
+        g.forEach(p => { const x = res.pages && res.pages[p.label]; if (x) { const old = is.rec[p.label], nr = toRec(x); carryPnoFlags(old, nr); is.rec[p.label] = nr; applyAiPno(is, p, nr, x.printed_page, res.model); } else b.fail.push(p.label); });
       } catch (e) {
         g.forEach(p => b.fail.push(p.label)); b.error = e.message;
         if (/今天的免費額度|金鑰|尚未設定|API key|PERMISSION|UNAUTHENTICATED/i.test(e.message)) { b.stop = true; if (/API key|PERMISSION|UNAUTHENTICATED|金鑰無效/i.test(e.message)) openAiDlg('這把金鑰無法使用：' + e.message); }
@@ -241,7 +251,25 @@ function pvConfirm(i) {
   propagatePno(i);
   return true;
 }
-function touch(r) { r.ok = false; recSaveSoon(issue()); }
+function touch(r) { r.ok = false; recSaveSoon(issue()); syncRecToEntry(r); }
+
+/* ---------- 逐頁核對 ⇄ 篇目目錄 雙向同步 ---------- */
+// 逐頁核對改了某一頁的題名／作者等 → 即時更新篇目目錄裡「起始影像就是這一頁」的那一筆
+function syncRecToEntry(r) {
+  const is = issue(); if (!is.id || !r.own || !r.title) return;
+  const label = Object.keys(is.rec).find(k => is.rec[k] === r); if (!label) return;
+  const find = list => { for (const n of list) { if (n.page1 === label) return n; const c = find(n.children); if (c) return c; } return null; };
+  const n = find(is.entries); if (!n) return;
+  Object.assign(n, { title: r.title, column: r.column || '', author: r.author || '', role: r.role || '', ad: !!r.ad });
+  persist();
+}
+// 篇目目錄存檔／修改一筆 → 即時更新逐頁核對裡它的起始影像那一頁（視為已確認）
+function syncEntryToRec(n) {
+  const is = issue(); if (!is.id || !n.page1 || !is.pages.some(p => p.label === n.page1)) return;
+  const r = is.rec[n.page1] || (is.rec[n.page1] = blankRec());
+  Object.assign(r, { own: true, title: n.title, column: n.column || '', author: n.author || '', role: n.role || '', ad: !!n.ad, ok: true, unsure: [] });
+  recSaveSoon(is);
+}
 
 function pnoField(i) {
   const is = issue(), p = is.pages[i], r = is.rec[p.label];
@@ -254,7 +282,7 @@ function pnoField(i) {
   const commit = () => {
     const n = normalizePageNo(inp.value);
     if (n === null) { toast('頁碼請填數字（中文數字、羅馬數字會自動換成阿拉伯數字）'); inp.value = p.pno || ''; return; }
-    if (n !== (p.pno || '')) { setPno(is, p, n); if (r) { r.pnoAi = false; r.pnoAuto = false; recSaveSoon(is); } }
+    if (n !== (p.pno || '')) { setPno(is, p, n); if (r) { r.pnoAi = false; r.pnoAuto = false; r.pnoSuggest = ''; recSaveSoon(is); } }
     inp.value = n; lab.querySelector('.unsure-tag')?.remove(); refreshAllPno(); pvShowImage();
   };
   inp.onchange = commit;
@@ -278,6 +306,17 @@ function pnoField(i) {
     const okb = h('button', 'btn', '沒問題（這裡本來就重新編號）'); okb.type = 'button';
     okb.onclick = () => { if (r) { r.pnoAi = false; recSaveSoon(is); } pvRender(); };
     bar.append(fix, okb); hint.append(bar); frag.append(hint);
+  }
+  const sg = pnoSuggested(is, i);
+  if (sg) {
+    const hint = h('div', 'pv-hint full pno-warn');
+    hint.append(h('div', '', `AI 這次辨識到的頁碼是 ${sg}，目前是 ${p.pno}。請對照影像決定要不要改。`));
+    const bar = h('div', 'pv-acts'); bar.style.marginTop = '6px';
+    const use = h('button', 'btn primary', `改成 ${sg}`); use.type = 'button';
+    use.onclick = () => { setPno(is, p, sg); r.pnoSuggest = ''; r.pnoAi = false; r.pnoAuto = false; recSaveSoon(is); PV.junc = pnoJunctions(is); pvRender(); };
+    const skip = h('button', 'btn', `保留 ${p.pno}`); skip.type = 'button';
+    skip.onclick = () => { r.pnoSuggest = ''; recSaveSoon(is); pvRender(); };
+    bar.append(use, skip); hint.append(bar); frag.append(hint);
   }
   frag.append(f);
   return frag;
@@ -333,6 +372,14 @@ function pvEditor(i) {
   const tog = h('button', 'btn', r.own ? '改為沿用前頁' : '這頁有新標題'); tog.type = 'button';
   tog.onclick = () => { r.own = !r.own; touch(r); pvRender({ focus: r.own }); };
   acts.append(ok, tog);
+  const re = h('button', 'btn', '重新分析這一頁'); re.type = 'button';
+  re.onclick = async () => {
+    if (r.ok && !confirm('這一頁已確認過，重新分析會覆蓋目前的題名、作者等內容。確定重新分析？')) return;
+    re.disabled = true; re.textContent = '辨識中…';
+    try { const nr = await analyzeOne(is, p); is.rec[p.label] = nr; recSaveSoon(is); syncRecToEntry(nr); toast('已重新分析這一頁'); } catch (e) { toast(e.message); }
+    pvRender({ focus: true });
+  };
+  acts.append(re);
   if (r.ai && r.own) {
     const rev = h('button', 'btn', '還原 AI 結果'); rev.type = 'button';
     rev.onclick = () => { Object.assign(r, r.ai); touch(r); pvRender(); };
@@ -350,7 +397,7 @@ function updateRowSummary(i) {
   ref.tt.textContent = !r ? '（尚未分析）' : (r.own ? (r.title || '（請補題名）') : '↳ ' + (res ? res.title : '（前面沒有標題）'));
   ref.sub.textContent = r && r.own ? ([r.column, r.author, r.ad ? '廣告' : ''].filter(Boolean).join('・') || '—') : '';
   ref.badge.className = 'badge b-' + s; ref.badge.textContent = ST_LABEL[s];
-  const pn = issue().pages[i].pno, fl = pnoFlagged(issue(), i); ref.pno.textContent = pn || '—'; ref.pno.className = 'pv-pno' + (pn ? '' : ' none') + (fl ? ' warn' : '') + (r && r.pnoAuto && pn ? ' auto' : ''); ref.pno.title = fl ? `頁碼和前面不連續（照順序應為 ${fl.expected}），可能是辨識錯誤` : pn ? '印在書上的頁碼：' + pn : '沒有頁碼';
+  const pn = issue().pages[i].pno, fl = pnoFlagged(issue(), i), sg = pnoSuggested(issue(), i); ref.pno.textContent = pn || '—'; ref.pno.className = 'pv-pno' + (pn ? '' : ' none') + (fl ? ' warn' : '') + (r && r.pnoAuto && pn ? ' auto' : '') + (sg ? ' sugg' : ''); if (sg) ref.pno.dataset.sugg = sg; else delete ref.pno.dataset.sugg; ref.pno.title = fl ? `頁碼和前面不連續（照順序應為 ${fl.expected}），可能是辨識錯誤` : pn ? '印在書上的頁碼：' + pn : '沒有頁碼';
   pvProgress();
 }
 function pvProgress() {
@@ -367,7 +414,8 @@ function pvRender(opts = {}) {
   const n = is.pages.length;
   PV.sel = Math.min(PV.sel, Math.max(0, n - 1));
   PV.junc = pnoJunctions(is);
-  $('pvThread').checked = isThread(is); $('pvThread').disabled = !is.id;
+  $('dataType').value = dataType(is); $('dataType').disabled = !is.id;
+  const sc = suggCount(); $('pvAdoptAll').hidden = !sc; $('pvAdoptAll').textContent = '採用全部 AI 頁碼建議（' + sc + '）';
   const c = pvProgress();
   // 頂端按鈕
   const b = PV.batch && PV.batch.is === is ? PV.batch : null;
@@ -375,7 +423,7 @@ function pvRender(opts = {}) {
   $('pvBatch').textContent = b ? `分析中 ${b.done}／${b.total}` : (c.none === n ? `分析整期（${n} 頁）` : c.none > 0 ? `繼續分析（尚餘 ${c.none} 頁）` : '重新分析未確認的頁面');
   // 篩選
   const fb = $('pvFilters'); fb.replaceChildren();
-  [['all', '全部', n], ['none', '未分析', c.none], ['review', '待檢查', c.review], ['inh', '沿用前頁', c.inh], ['bad', '缺題名', c.bad], ['ok', '已確認', c.ok], ['jump', '頁碼不連續', is.pages.filter((p, i) => pnoFlagged(is, i)).length], ['nopno', '無頁碼', is.pages.filter(p => !p.pno).length]].forEach(([k, l, cnt]) => {
+  [['all', '全部', n], ['none', '未分析', c.none], ['review', '待檢查', c.review], ['inh', '沿用前頁', c.inh], ['bad', '缺題名', c.bad], ['ok', '已確認', c.ok], ['sugg', 'AI 頁碼建議', suggCount()], ['jump', '頁碼不連續', is.pages.filter((p, i) => pnoFlagged(is, i)).length], ['nopno', '無頁碼', is.pages.filter(p => !p.pno).length]].forEach(([k, l, cnt]) => {
     const chip = h('button', 'chip', `${l} ${cnt}`); chip.type = 'button'; chip.setAttribute('aria-pressed', PV.filter === k);
     chip.onclick = () => { PV.filter = k; pvRender(); }; fb.append(chip);
   });
@@ -385,7 +433,7 @@ function pvRender(opts = {}) {
   if (!n) box.append(Object.assign(h('div', 'pv-hint', is.id ? '這一期沒有影像。請把圖檔放進 img 資料夾裡這一期的資料夾。' : '請先在上方選擇期刊。'), { style: 'margin:12px' }));
   is.pages.forEach((p, i) => {
     const s = pvStatus(i);
-    if (PV.filter !== 'all' && s !== PV.filter && !(PV.filter === 'nopno' && !p.pno) && !(PV.filter === 'jump' && pnoFlagged(is, i)) && i !== PV.sel) return;
+    if (PV.filter !== 'all' && s !== PV.filter && !(PV.filter === 'nopno' && !p.pno) && !(PV.filter === 'jump' && pnoFlagged(is, i)) && !(PV.filter === 'sugg' && pnoSuggested(is, i)) && i !== PV.sel) return;
     const row = h('div', 'pv-row' + (i === PV.sel ? ' sel' : '')); row.dataset.i = i;
     const pg = h('div', 'pv-pg', String(i + 1)); pg.append(h('small', '', pvTail(p.label)));
     const mid = h('div'), tt = h('div', 'pv-tt'), sub = h('div', 'pv-sub'), badge = h('span', 'badge');
@@ -484,7 +532,8 @@ $('aiSaveTest').onclick = () => saveKey(true);
 $('aiSave').onclick = () => saveKey(false);
 $('aiClear').onclick = () => { setUserKey(''); $('aiError').hidden = true; updateKeyState(); toast(window.SERVER_KEY ? '已清除，之後會使用伺服器預設金鑰' : '已清除金鑰，要使用 AI 辨識請重新輸入'); };
 /* ---------- 線裝書：頁碼在中縫，只填篇目首頁，後面的頁自動接續 ---------- */
-const isThread = is => (is.meta || {})['線裝書'] === '是';
+const dataType = is => { const m = is.meta || {}; return m['資料類型'] || (m['線裝書'] === '是' ? '線裝書' : '期刊'); };
+const isThread = is => dataType(is) === '線裝書';
 
 function toastUndo(msg, undo) {
   const t = $('toast');
@@ -496,35 +545,53 @@ function toastUndo(msg, undo) {
   clearTimeout(toast.timer); toast.timer = setTimeout(() => { t.hidden = true; }, 10000);
 }
 
-// 按「確認」確認的是篇目首頁、且有數字頁碼時：同一篇目後面「沿用前頁」的頁，依序填成 N+1、N+2……（一張影像算一頁）
-// 遇到下一個有新標題的頁，或還沒分析的頁就停止（下一篇的首頁不自動接續）。
-// 已經有頁碼的頁：AI 辨識或先前自動填、而且還沒確認的會被覆蓋；人工填的、或已確認的不動。
+// 任何一頁按「確認」時，只要這一頁有數字頁碼：同一篇目後面「沿用前頁」的頁，依序更新成 N+1、N+2……（一張影像算一頁）
+// 一般書：遇到下一個有新標題的頁就停止（下一篇的首頁不自動接續）；線裝書：葉次一路連續，不受篇目分界影響。遇到還沒分析的頁、或和預期頁碼不吻合的已確認頁就停止。
+// 已經有頁碼的頁：只要還沒確認就會被更新（舊資料分不清是人工填或 AI 填的，所以只用「已確認」當保護）；已確認的頁不動。
 function propagatePno(i) {
   const is = issue(), P = is.pages, p = P[i], r = is.rec[p.label];
-  if (!r || !r.own || !r.title || !/^\d+$/.test(p.pno || '')) return;
-  const base = +p.pno, snap = [];
+  if (!r || !/^\d+$/.test(p.pno || '')) return;
+  const base = +p.pno, snap = [], thread = isThread(is);
   for (let k = i + 1; k < P.length; k++) {
     const q = P[k], rq = is.rec[q.label];
-    if (!rq || rq.own) break;
+    if (!rq) break;                       // 還沒分析的頁：停止
+    if (rq.own && !thread) break;         // 一般書：下一篇的首頁不接續；線裝書同一冊葉次連續，繼續往下
     const want = String(base + (k - i));
+    if (rq.ok) { if (q.pno === want) continue; break; } // 已確認的頁是定錨：頁碼吻合就繼續；不吻合（可能這裡重新編號）就停止，不硬蓋
     if (q.pno === want) continue;
-    if (q.pno && !((rq.pnoAi || rq.pnoAuto) && !rq.ok)) continue; // 人工填的或已確認的：不動，但後面仍照順序編號
-    snap.push({ label: q.label, pno: q.pno || '', pnoAi: !!rq.pnoAi, pnoAuto: !!rq.pnoAuto });
-    setPno(is, q, want); rq.pnoAi = false; rq.pnoAuto = true;
+    snap.push({ label: q.label, pno: q.pno || '', pnoAi: !!rq.pnoAi, pnoAuto: !!rq.pnoAuto, sug: rq.pnoSuggest || '' });
+    setPno(is, q, want); rq.pnoAi = false; rq.pnoAuto = true; rq.pnoSuggest = '';
   }
   if (!snap.length) return;
-  recSaveSoon(is); pvRender();
+  PV.junc = pnoJunctions(is); recSaveSoon(is); pvRender();
   toastUndo(`已自動接續後面 ${snap.length} 頁的頁碼（${base + 1} 起）`, () => {
-    snap.forEach(s0 => { const q = P.find(x => x.label === s0.label), rq = is.rec[s0.label]; setPno(is, q, s0.pno); rq.pnoAi = s0.pnoAi; rq.pnoAuto = s0.pnoAuto; });
-    recSaveSoon(is); pvRender();
+    snap.forEach(s0 => { const q = P.find(x => x.label === s0.label), rq = is.rec[s0.label]; setPno(is, q, s0.pno); rq.pnoAi = s0.pnoAi; rq.pnoAuto = s0.pnoAuto; rq.pnoSuggest = s0.sug; });
+    PV.junc = pnoJunctions(is); recSaveSoon(is); pvRender();
   });
 }
 
-$('pvThread').onchange = () => {
+// 一次採用全部 AI 頁碼建議（已確認的頁不動）；採用的頁碼標「AI 辨識，請核對」，並可復原
+function adoptAllSuggestions() {
+  const is = issue(), snap = [];
+  is.pages.forEach((p, i) => {
+    const sg = pnoSuggested(is, i), r = is.rec[p.label]; if (!sg) return;
+    snap.push({ label: p.label, pno: p.pno, pnoAi: !!r.pnoAi, pnoAuto: !!r.pnoAuto, sug: r.pnoSuggest });
+    setPno(is, p, sg); r.pnoSuggest = ''; r.pnoAi = true; r.pnoAuto = false;
+  });
+  if (!snap.length) return;
+  recSaveSoon(is); PV.junc = pnoJunctions(is); pvRender();
+  toastUndo(`已採用 ${snap.length} 頁的 AI 頁碼建議`, () => {
+    snap.forEach(s0 => { const q = is.pages.find(x => x.label === s0.label), rq = is.rec[s0.label]; setPno(is, q, s0.pno); rq.pnoAi = s0.pnoAi; rq.pnoAuto = s0.pnoAuto; rq.pnoSuggest = s0.sug; });
+    recSaveSoon(is); PV.junc = pnoJunctions(is); pvRender();
+  });
+}
+$('pvAdoptAll').onclick = adoptAllSuggestions;
+
+$('dataType').onchange = () => {
   const is = issue(); if (!is.id) return;
-  const on = $('pvThread').checked, meta = { ...is.meta, '線裝書': on ? '是' : '否' };
+  const t = $('dataType').value, meta = { ...is.meta, '資料類型': t, '線裝書': t === '線裝書' ? '是' : '否' };
   api('saveMeta.php', { book: is.id, meta: JSON.stringify(meta) })
-    .then(() => { is.meta = meta; toast(on ? '已設為線裝書：之後分析會以中縫（版心）的頁碼為主；已分析過的頁不會重辨識' : '已取消線裝書設定'); })
+    .then(() => { is.meta = meta; toast('資料類型：' + t + (t === '線裝書' ? '（分析時以中縫版心的頁碼為主；已分析過的頁不會重辨識）' : '')); })
     .catch(e => { toast('存檔失敗：' + e.message); pvRender(); });
 };
 

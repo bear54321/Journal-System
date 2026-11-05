@@ -17,7 +17,7 @@ natcasesort($books);
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>期刊編目工作台</title>
+<title>郭廷以圖書館數位化資料編目工作臺</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -107,6 +107,14 @@ textarea { resize: vertical; width: 100%; display: block; }
 .inline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
 .inline > input[type="text"] { flex: 1 1 110px; width: auto; }
 .check { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.field-range { align-items: start; }
+.field-range > .lab { padding-top: 7px; }
+.range-grid { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px 8px; align-items: center; }
+.range-grid .rg-l { color: var(--muted); font-size: 12px; }
+.range-grid input[type="text"] { font-family: var(--mono); font-size: 13px; text-overflow: clip; }
+.range-grid .link-btn { padding: 4px 8px; border: 1px solid var(--line); border-radius: 4px; text-decoration: none; background: var(--panel); }
+.range-grid .link-btn:hover { border-color: var(--accent); }
+.range-opts { gap: 12px; }
 .link-btn { background: none; border: 0; padding: 0 2px; color: var(--accent); cursor: pointer; font-size: 12px; text-decoration: underline; white-space: nowrap; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
 .error { color: var(--danger); background: var(--danger-soft); border-radius: 4px; padding: 4px 8px; margin-top: 8px; font-size: 13px; }
@@ -192,6 +200,7 @@ legend { font-weight: 700; padding: 0; margin-bottom: 6px; color: var(--accent);
 .pv-pno.none { color: var(--none); font-weight: 400; }
 .pv-pno.warn { color: var(--rev); }
 .pv-pno.auto::after { content: '自動'; display: block; font: 400 10px var(--sans); color: var(--muted); }
+.pv-pno.sugg::after { content: 'AI 建議 ' attr(data-sugg); display: block; font: 400 10px var(--sans); color: var(--rev); }
 .auto-tag { background: var(--accent-soft); color: var(--accent); }
 .pv-pno.warn::after { content: '⚠ 不連續'; display: block; font: 400 10px var(--sans); }
 .pno-warn { background: var(--rev-soft); border-color: #d6b24a; color: var(--fg); }
@@ -240,7 +249,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-bottom-width
 <body>
 <div class="app mode-pages" id="app">
   <header class="top">
-    <h1 class="brand">期刊編目工作台</h1>
+    <h1 class="brand">郭廷以圖書館數位化資料編目工作臺</h1>
     <span class="notice">資料存在伺服器（data/ 與 img/ 資料夾）・<a href="classic.php">舊版介面</a></span>
     <span class="spacer"></span>
     <div class="seg" id="modeSeg" role="group" aria-label="切換工作模式"><button type="button" data-m="pages" aria-pressed="true">逐頁核對</button><button type="button" data-m="catalog" aria-pressed="false">篇目目錄</button></div>
@@ -251,7 +260,8 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-bottom-width
   </header>
 
   <nav class="nav" aria-label="切換期刊與頁面">
-    <label>期刊 <select id="issueSelect"></select></label>
+    <label>資料 <select id="issueSelect"></select></label>
+    <label>資料類型 <select id="dataType" title="不同資料類型會套用不同的 AI 辨識規則"><option>一般類型</option><option>期刊</option><option>線裝書</option><option>公報</option><option>報紙</option></select></label>
     <label class="only-catalog">影像 <select id="pageSelect"></select></label>
     <span class="pno-tag only-catalog" id="pnoTag" aria-live="polite"></span>
     <button class="btn only-catalog" id="prevPage" type="button">上一頁</button>
@@ -267,7 +277,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-bottom-width
       <div class="pv-prog" id="pvProg" title="核對進度"></div>
       <span class="pv-count" id="pvCount"></span>
       <span class="spacer"></span>
-      <label class="check" title="線裝書的頁碼印在書葉中縫（版心）：分析時以中縫的頁碼為主；只要確認篇目首頁的頁碼，後面的頁會自動接續"><input type="checkbox" id="pvThread"> 線裝書（頁碼在中縫）</label>
+      <button class="link-btn" id="pvAdoptAll" type="button" hidden></button>
       <button class="link-btn" id="pvKeyBtn" type="button" title="按一下設定 AI 金鑰"></button>
       <button class="btn" id="pvApply" type="button" title="把逐頁資料合併成篇目目錄（連續同題名的頁會併成一筆）">套用到篇目目錄</button>
     </div>
@@ -309,17 +319,14 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-bottom-width
             <div class="inline"><input type="text" id="fColumn"><label class="check"><input type="checkbox" id="fAd"> 廣告</label></div></div>
           <div class="field"><label for="fAuthor">作者</label>
             <div class="inline"><input type="text" id="fAuthor"><input type="text" id="fRole" aria-label="作者角色頭銜" placeholder="角色頭銜，如：譯"></div></div>
-          <div class="field"><span class="lab">影像範圍</span>
+          <div class="field field-range"><span class="lab">影像範圍</span>
             <div class="fields">
-              <div class="inline" id="rangeBox">
-                <input type="text" id="fPage1" aria-label="起始影像">
-                <button class="link-btn" type="button" id="useStart">用目前影像</button>
-                <span>至</span>
-                <input type="text" id="fPage2" aria-label="結束影像">
-                <button class="link-btn" type="button" id="useEnd">用目前影像</button>
+              <div class="range-grid" id="rangeBox">
+                <span class="rg-l">起</span><input type="text" id="fPage1" aria-label="起始影像"><button class="link-btn" type="button" id="useStart">用目前影像</button>
+                <span class="rg-l">迄</span><input type="text" id="fPage2" aria-label="結束影像"><button class="link-btn" type="button" id="useEnd">用目前影像</button>
               </div>
               <div class="picked" id="pickedBox" hidden></div>
-              <div class="inline"><button class="link-btn" type="button" id="pageSetting">自訂範圍</button><button class="link-btn" type="button" id="pageReset">預設範圍</button></div>
+              <div class="inline range-opts"><button class="link-btn" type="button" id="pageSetting">自訂範圍</button><button class="link-btn" type="button" id="pageReset">預設範圍</button></div>
             </div>
           </div>
         </div>
@@ -408,5 +415,5 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-bottom-width
 <div class="toast" id="toast" role="status" hidden></div>
 <script>window.BOOKS = <?= json_encode(array_values($books), JSON_UNESCAPED_UNICODE) ?>; window.SERVER_KEY = <?= GEMINI_API_KEY !== '' ? 'true' : 'false' ?>;</script>
 <script src="app.js?v=4"></script>
-<script src="pages.js?v=5"></script>
+<script src="pages.js?v=6"></script>
 </body></html>

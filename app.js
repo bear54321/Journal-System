@@ -1,9 +1,9 @@
 const KEY = 'journal-catalog-proto-v2';
 const $ = id => document.getElementById(id);
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id' + Date.now() + Math.random().toString(16).slice(2));
-const YES_NO = ['目錄顯示', '數位物件前台開放權限', '前台可否下載', '是否製作浮水印', '線裝書'];
+const YES_NO = ['目錄顯示', '數位物件前台開放權限', '前台可否下載', '是否製作浮水印'];
 const META_GROUPS = [
-  ['書目', ['刊名', '報刊名第一字', '報刊第一字筆畫', '關鍵詞主題', '專刊名稱', '刊期', '出版者', '出版地', '卷號', '條碼號', '線裝書']],
+  ['書目', ['刊名', '報刊名第一字', '報刊第一字筆畫', '關鍵詞主題', '專刊名稱', '刊期', '出版者', '出版地', '卷號', '條碼號']],
   ['出版日期', ['西元出版日期(完整)', '出版年', '出版月', '出版日']],
   ['館藏與開放', ['語言', '典藏單位', '目錄顯示', '數位物件前台開放權限', '數位物件開放限制', '前台可否下載', '是否製作浮水印']]
 ];
@@ -167,7 +167,7 @@ $('divider').addEventListener('keydown', e => {
 
 /* ---------- 期刊與頁面切換 ---------- */
 function renderIssueSelect() {
-  $('issueSelect').replaceChildren(new Option('選擇期刊', '', false, !state.issueId), ...state.issues.map(i => new Option(i.name, i.id, false, i.id === state.issueId)));
+  $('issueSelect').replaceChildren(new Option('選擇資料', '', false, !state.issueId), ...state.issues.map(i => new Option(i.name, i.id, false, i.id === state.issueId)));
 }
 function renderPageSelect() {
   $('pageSelect').replaceChildren(...issue().pages.map((p, i) => new Option(p.label, i, false, i === state.pageIdx)));
@@ -281,14 +281,14 @@ $('entryForm').addEventListener('submit', e => {
   };
   if (editingId) {
     const loc = locate(editingId);
-    if (loc) { Object.assign(loc.node, data); flashId = loc.node.id; }
+    if (loc) { Object.assign(loc.node, data); flashId = loc.node.id; syncEntryToRec(loc.node); }
     toast('已更新篇目');
   } else {
     const node = { id: uid(), collapsed: false, children: [], ...data };
     const parent = $('levelOn').checked && selectedId ? locate(selectedId) : null;
     if (parent) { parent.node.children.push(node); parent.node.collapsed = false; }
     else issue().entries.push(node);
-    flashId = node.id;
+    flashId = node.id; syncEntryToRec(node);
     toast(parent ? `已存到「${parent.node.title}」之下` : '已存檔');
   }
   resetForm(); renderTree(); persist();
@@ -401,13 +401,11 @@ function renderRow(n) {
   } else {
     const mk = (label, cls, fn) => { const b = make('button', 'link-btn ' + cls, label); b.type = 'button'; b.onclick = e => { e.stopPropagation(); fn(); }; return b; };
     act.append(
-      mk('前往', '', () => { const i = labelIndex(firstLabel(n)); if (i >= 0) showPage(i); else toast('這一期找不到這張影像'); }),
-      mk('修改', '', () => { const i = labelIndex(firstLabel(n)); if (i >= 0) showPage(i); selectedId = n.id; loadForm(n); renderTree(); }),
       mk('刪除', 'del', () => { confirmDeleteId = n.id; renderTree(); })
     );
   }
   row.append(act);
-  row.onclick = () => { selectedId = selectedId === n.id ? null : n.id; renderTree(); };
+  row.onclick = () => { const i = labelIndex(firstLabel(n)); if (i >= 0) showPage(i); else toast('這一期找不到這張影像'); selectedId = n.id; loadForm(n); renderTree(); };
   li.append(row);
 
   if (n.children.length && !n.collapsed) {

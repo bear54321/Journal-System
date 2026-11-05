@@ -33,6 +33,7 @@ foreach ($in as $label => $r) {
   $rec['ok'] = empty($r['ok']) ? 0 : 1;
   $rec['pnoAi'] = empty($r['pnoAi']) ? 0 : 1;
   $rec['pnoAuto'] = empty($r['pnoAuto']) ? 0 : 1;
+  $rec['pnoSuggest'] = preg_replace('/\D/', '', (string)($r['pnoSuggest'] ?? '')); // AI 這次辨識到、與現有頁碼不同的頁碼（待使用者決定）
   $rec['unsure'] = array_values(array_intersect(is_array($r['unsure'] ?? null) ? $r['unsure'] : [], ['title', 'author', 'column']));
   $rec['more'] = array_map('article', array_slice(is_array($r['more'] ?? null) ? $r['more'] : [], 0, 6));
   $rec['ai'] = isset($r['ai']) && is_array($r['ai']) ? article($r['ai']) : null;
