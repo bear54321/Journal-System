@@ -43,7 +43,6 @@ natcasesort($books);
       <button class="sb-item" id="openAi" type="button" title="輸入您自己的 Gemini API 金鑰"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg><span>AI 設定</span></button>
     </nav>
     <div class="sb-spacer"></div>
-    <a class="sb-item" href="classic.php" title="切換到舊版介面"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><polyline points="1 4 1 10 7 10"/><path d="M3.5 15a9 9 0 1 0 2.1-9.4L1 10"/></svg><span>舊版介面</span></a>
     <div class="sb-card">
       <label>資料 <select id="issueSelect"></select></label>
       <label>資料類型 <select id="dataType" title="不同資料類型會套用不同的 AI 辨識規則"><option>一般類型</option><option>期刊</option><option>線裝書</option><option>公報</option><option>報紙</option></select></label>
