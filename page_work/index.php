@@ -2,7 +2,8 @@
 require_once __DIR__ . '/../lib.php';
 
 $book = isset($_GET['no']) ? trim((string)$_GET['no']) : '';
-if ($book === '' || preg_match('/[\x00-\x1f\/\\\\]/', $book) || strpos($book, '..') !== false) {
+if ($book === '' || preg_match('/[\x00-\x1f\\\\]/', $book) || strpos($book, '..') !== false
+    || $book[0] === '/' || substr($book, -1) === '/' || strpos($book, '//') !== false) {
   http_response_code(400);
   exit('bad book');
 }

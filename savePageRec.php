@@ -35,7 +35,13 @@ foreach ($in as $label => $r) {
   $rec['pnoAuto'] = empty($r['pnoAuto']) ? 0 : 1;
   $rec['pnoSuggest'] = preg_replace('/\D/', '', (string)($r['pnoSuggest'] ?? '')); // AI 這次辨識到、與現有頁碼不同的頁碼（待使用者決定）
   $rec['unsure'] = array_values(array_intersect(is_array($r['unsure'] ?? null) ? $r['unsure'] : [], ['title', 'author', 'column']));
-  $rec['more'] = array_map('article', array_slice(is_array($r['more'] ?? null) ? $r['more'] : [], 0, 6));
+  // 同一張影像的其他題名（逐頁核對清單裡的子列）：除了題名、作者、專欄、角色，也各自保存「廣告」「已確認」
+  $rec['more'] = array_map(function ($m) {
+    $x = article($m); $m = is_array($m) ? $m : [];
+    $x['ad'] = empty($m['ad']) ? 0 : 1;
+    $x['ok'] = empty($m['ok']) ? 0 : 1;
+    return $x;
+  }, array_slice(is_array($r['more'] ?? null) ? array_values($r['more']) : [], 0, 6));
   $rec['ai'] = isset($r['ai']) && is_array($r['ai']) ? article($r['ai']) : null;
   $out[$label] = $rec;
 }

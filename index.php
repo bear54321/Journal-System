@@ -1,17 +1,8 @@
 <?php
-require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/lib.php';
 
-// 期刊清單：影像資料夾與已有篇目的資料夾合併，自然排序
-$books = [];
-foreach ([IMG_DIR, DATA_DIR] as $base) {
-  if (!is_dir($base)) continue;
-  foreach (scandir($base) as $d) {
-    if ($d[0] === '.' || !is_dir($base . '/' . $d)) continue;
-    $books[rawurldecode($d)] = true;
-  }
-}
-$books = array_keys($books);
-natcasesort($books);
+// 資料清單：依影像資料夾的階層（如「公報/河北省政府公報」）與已有編目資料的資料夾合併，自然排序
+$books = list_books();
 ?><!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
@@ -20,7 +11,7 @@ natcasesort($books);
 <title>郭廷以圖書館數位化資料編目工作臺</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="ui.css?v=31">
-<link rel="stylesheet" href="theme.css?v=3">
+<link rel="stylesheet" href="theme.css?v=13">
 <script src="theme.js?v=1"></script>
 </head>
 <body>
@@ -186,7 +177,15 @@ natcasesort($books);
 
 <dialog id="exportDlg" aria-labelledby="exportTitle">
   <div class="dlg-head"><h2 id="exportTitle">匯出與還原</h2><button class="btn ghost" type="button" data-close>關閉</button></div>
-  <div class="dlg-body"><textarea id="exportText" readonly aria-label="匯出的 JSON 資料"></textarea></div>
+  <div class="dlg-body">
+    <section class="restore-box" aria-labelledby="restoreTitle">
+      <h3 id="restoreTitle">還原本期到最初狀態</h3>
+      <p class="notice">回到第一次用 AI 分析之前的樣子：逐頁核對資料變回「未分析」，AI 填的頁碼、篇目目錄也一併回到當時。載體編目（資料類型等）不受影響。</p>
+      <p class="notice" id="restoreInfo" aria-live="polite"></p>
+      <button class="btn danger" type="button" id="restoreInitial">還原本期到最初狀態</button>
+    </section>
+    <textarea id="exportText" readonly aria-label="匯出的 JSON 資料"></textarea>
+  </div>
   <div class="dlg-foot">
     <button class="btn primary" type="button" id="copyJson">複製 JSON</button>
     <span class="spacer"></span>
@@ -234,7 +233,8 @@ natcasesort($books);
   <div class="img-stage" id="imgStage"><img id="imgPreviewImg" alt=""></div>
 </dialog>
 <div class="toast" id="toast" role="status" hidden></div>
+<div class="notice-pop" id="noticePop" role="alert" hidden><button class="notice-x" type="button" aria-label="關閉提示" title="關閉">×</button><div class="notice-body"></div></div>
 <script>window.BOOKS = <?= json_encode(array_values($books), JSON_UNESCAPED_UNICODE) ?>; window.SERVER_KEY = <?= GEMINI_API_KEY !== '' ? 'true' : 'false' ?>;</script>
-<script src="app.js?v=18"></script>
-<script src="pages.js?v=31"></script>
+<script src="app.js?v=23"></script>
+<script src="pages.js?v=43"></script>
 </body></html>

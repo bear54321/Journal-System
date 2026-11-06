@@ -22,3 +22,8 @@ ocr/get-pip.py
 ocr/__pycache__/
 
 ocr/php-server.log
+
+# 評測用的標準答案、AI 回應快取與報告（機構編目資料，不要上傳）
+eval/gold/
+eval/cache/
+eval/out/

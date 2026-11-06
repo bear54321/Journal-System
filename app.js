@@ -14,8 +14,14 @@ const META_DEFAULT = { '語言': '中文', '典藏單位': '中研院近史所',
 const KEY_STORE = 'journal-gemini-key';
 const getUserKey = () => { try { return localStorage.getItem(KEY_STORE) || ''; } catch (e) { return ''; } };
 const setUserKey = k => { try { if (k) localStorage.setItem(KEY_STORE, k); else localStorage.removeItem(KEY_STORE); return true; } catch (e) { return false; } };
-const api = (ep, data) => fetch(ep, { method: 'POST', body: new URLSearchParams(ep === 'analyze.php' && !(data && data.api_key) && getUserKey() ? { ...data, api_key: getUserKey() } : data) })
-  .then(r => r.text().then(t => { if (!r.ok) throw new Error(t || r.status); return t; }));
+// opts.keepalive：離開頁面時送出的存檔，瀏覽器會讓它在頁面關閉後繼續送完（上限約 64KB，超過就退回一般請求）
+const encLen = data => new URLSearchParams(data).toString().length;
+const api = (ep, data, opts) => {
+  const body = new URLSearchParams(ep === 'analyze.php' && !(data && data.api_key) && getUserKey() ? { ...data, api_key: getUserKey() } : data);
+  const keepalive = !!(opts && opts.keepalive) && body.toString().length < 60000;
+  return fetch(ep, { method: 'POST', body, keepalive })
+    .then(r => r.text().then(t => { if (!r.ok) throw new Error(t || r.status); return t; }));
+};
 const parse = (t, fallback) => { try { const v = JSON.parse(t); return v == null ? fallback : v; } catch (e) { return fallback; } };
 const imgUrl = (book, label) => 'giveimg.php?b=' + encodeURIComponent(book) + '&p=' + encodeURIComponent(label);
 
@@ -53,15 +59,20 @@ function flatten(list, pid, out) {
 // 篇目有變動就延遲 0.4 秒存檔；內容和上次存的一樣就不送出
 let pendingIssue = null, saveTimer = null;
 function persist() { pendingIssue = issue(); clearTimeout(saveTimer); saveTimer = setTimeout(flushSave, 400); }
-function flushSave() {
+// 回傳 false 表示「離開頁面時可能來不及存完」（資料太大，無法用 keepalive）
+function flushSave(unloading) {
   clearTimeout(saveTimer);
   const is = pendingIssue; pendingIssue = null;
-  if (!is || !is.loaded) return;
+  if (!is || !is.loaded) return true;
   const body = JSON.stringify(flatten(is.entries, 'start', {}));
-  if (body === is.saved) return;
-  api('saveIndex.php', { book: is.id, tmpData: body }).then(() => { is.saved = body; }).catch(e => toast('存檔失敗：' + e.message));
+  if (body === is.saved) return true;
+  const params = { book: is.id, tmpData: body };
+  api('saveIndex.php', params, unloading === true ? { keepalive: true } : undefined).then(() => { is.saved = body; }).catch(e => toast('存檔失敗：' + e.message));
+  return unloading !== true || encLen(params) < 60000;
 }
-window.addEventListener('beforeunload', flushSave);
+window.addEventListener('beforeunload', e => {
+  if (flushSave(true) === false) { e.preventDefault(); e.returnValue = ''; } // 太大送不完：讓瀏覽器問一下是否離開
+});
 
 async function loadIssue(is) {
   const [nums, pn, data, meta, recs] = await Promise.all([
@@ -94,6 +105,9 @@ function locate(id, list = issue().entries, parent = null) {
 function walk(fn, list = issue().entries) { list.forEach(n => { fn(n); walk(fn, n.children); }); }
 function contains(node, id) { return node.id === id || node.children.some(c => contains(c, id)); }
 
+// 不會自動消失的提示：按右上角 × 才關閉（用在重要的說明，例如備援模型的提醒）
+function showNotice(msg) { const n = $('noticePop'); n.querySelector('.notice-body').textContent = msg; n.hidden = false; }
+$('noticePop').querySelector('.notice-x').onclick = () => { $('noticePop').hidden = true; };
 function toast(msg) {
   const t = $('toast'); t.textContent = msg; t.hidden = false;
   clearTimeout(toast.timer); toast.timer = setTimeout(() => { t.hidden = true; }, Math.max(2600, msg.length * 120));
@@ -168,8 +182,18 @@ $('divider').addEventListener('keydown', e => {
 });
 
 /* ---------- 期刊與頁面切換 ---------- */
+// 依資料夾階層顯示：「公報/河北省政府公報」→ 分類「公報」底下的選項「河北省政府公報」（沒有上層的直接列在最上面）
 function renderIssueSelect() {
-  $('issueSelect').replaceChildren(new Option('選擇資料', '', false, !state.issueId), ...state.issues.map(i => new Option(i.name, i.id, false, i.id === state.issueId)));
+  const sel = [new Option('選擇資料', '', false, !state.issueId)];
+  let group = null, groupKey = null;
+  state.issues.forEach(i => {
+    const parts = i.id.split('/'), leaf = parts.pop(), key = parts.join(' › ');
+    const opt = new Option(leaf, i.id, false, i.id === state.issueId);
+    if (!key) { group = groupKey = null; sel.push(opt); return; }
+    if (key !== groupKey) { group = document.createElement('optgroup'); group.label = key; groupKey = key; sel.push(group); }
+    group.append(opt);
+  });
+  $('issueSelect').replaceChildren(...sel);
 }
 function renderPageSelect() {
   $('pageSelect').replaceChildren(...issue().pages.map((p, i) => new Option(p.label, i, false, i === state.pageIdx)));
@@ -294,7 +318,7 @@ $('entryForm').addEventListener('submit', e => {
   };
   if (editingId) {
     const loc = locate(editingId);
-    if (loc) { Object.assign(loc.node, data); flashId = loc.node.id; syncEntryToRec(loc.node); }
+    if (loc) { const oldTitle = loc.node.title; Object.assign(loc.node, data); flashId = loc.node.id; syncEntryToRec(loc.node, oldTitle); }
     toast('已更新篇目');
   } else {
     const node = { id: uid(), collapsed: false, children: [], ...data };
@@ -361,7 +385,7 @@ function pagesText(n) {
   return n.page1 === n.page2 ? n.page1 : `${n.page1}–${n.page2}`;
 }
 // 清單用的簡短影像範圍：去掉與資料編號相同的前綴，例如 0MHC0019320-01-0001 → 01-0001
-function shortLabel(l) { const id = issue().id + '-'; return l.startsWith(id) ? l.slice(id.length) : l; }
+function shortLabel(l) { const id = issue().id.split('/').pop() + '-'; return l.startsWith(id) ? l.slice(id.length) : l; }
 function pagesShort(n) {
   if (n.pageList.length) { const a = n.pageList.map(shortLabel); return a.length > 3 ? a.slice(0, 3).join('、') + '…（共 ' + a.length + ' 張）' : a.join('、'); }
   return n.page1 === n.page2 ? shortLabel(n.page1) : `${shortLabel(n.page1)} ～ ${shortLabel(n.page2)}`;
@@ -582,6 +606,39 @@ $('openExport').onclick = () => {
   if (!issue().id) return toast('請先選擇期刊');
   $('exportText').value = exportData();
   $('exportDlg').showModal();
+  refreshRestoreInfo();
+};
+/* ---------- 還原本期到最初狀態（第一次 AI 分析前的樣子） ---------- */
+async function refreshRestoreInfo() {
+  const info = $('restoreInfo'), btn = $('restoreInitial'), is = issue();
+  info.textContent = '讀取中…'; btn.disabled = true;
+  try {
+    const r = parse(await api('restoreInitial.php', { book: is.id, info: '1' }), {});
+    if (is !== issue()) return;
+    if (!r.exists) { info.textContent = '最初狀態備份：還沒有。第一次用 AI 分析這一期時，會自動記下分析前的樣子。'; return; }
+    info.textContent = '最初狀態備份：' + r.created + (r.legacy
+      ? '（這一期在此功能加入前就已分析過，所以是推測的最初狀態：逐頁核對資料清空、AI 填的頁碼移除、篇目回到最早的備份版本）'
+      : '（第一次 AI 分析前）');
+    btn.disabled = false;
+  } catch (e) { info.textContent = '讀取失敗：' + e.message; }
+}
+$('restoreInitial').onclick = async () => {
+  const is = issue(); if (!is.id) return;
+  if (!confirm('確定要把「' + is.name + '」還原到最初狀態嗎？\n\n逐頁核對資料、篇目目錄、頁碼都會回到第一次 AI 分析前的樣子，目前的修改會被取代。\n（還原前會先備份目前狀態，存放在 data 資料夾這一期的 before-restore 裡，最多保留 5 份。）')) return;
+  const btn = $('restoreInitial'); btn.disabled = true; btn.textContent = '還原中…';
+  try {
+    // 先把還沒存的修改送出，再還原，避免之後被舊的畫面資料蓋回去
+    flushSave(); if (typeof pnoFlush === 'function') await pnoFlush(); if (typeof recFlush === 'function') await recFlush();
+    await api('restoreInitial.php', { book: is.id });
+    is.loaded = false; pendingIssue = null;
+    if (typeof PV !== 'undefined') { PV.dirty.delete(is); PV.sel = 0; PV.sub = null; PV.collapsed = false; }
+    await loadIssue(is);
+    state.pageIdx = 0; selectedId = null; resetForm(); renderAll();
+    $('exportText').value = exportData();
+    toast('已還原到最初狀態');
+    refreshRestoreInfo();
+  } catch (e) { toast('還原失敗：' + e.message); }
+  finally { btn.textContent = '還原本期到最初狀態'; }
 };
 $('copyJson').onclick = () => {
   const ta = $('exportText');
@@ -658,6 +715,9 @@ function tocIndexOf(printed, base) {
   if (exact >= 0) return exact;
   const n = parseInt(s, 10);
   if (Number.isNaN(n) || n < 1) return -1;
+  // 跨頁（頁碼「1-2」）：目錄上的 2 也算在這張影像裡
+  const inRange = pages.findIndex(p => /^\d+-\d+$/.test(p.pno || '') && n >= parseInt(p.pno, 10) && n <= parseInt(p.pno.split('-')[1], 10));
+  if (inRange >= 0) return inRange;
   const k = base + n - 1;
   return k < pages.length ? k : -1;
 }

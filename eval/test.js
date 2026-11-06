@@ -1,0 +1,48 @@
+// 自我檢查：node eval/test.js（不呼叫 API）
+'use strict';
+const assert = require('assert');
+const { normText, normPage, normDate, normBool, cer, sim } = require('./lib/normalize');
+const { parseCSV, toCSV } = require('./lib/csv');
+const { scoreImage, aggregate } = require('./lib/score');
+let n = 0; const t = (name, fn) => { try { fn(); n++; console.log('  ✔ ' + name); } catch (e) { console.error('  ✘ ' + name + '\n    ' + e.message); process.exitCode = 1; } };
+
+t('頁碼：多個數字取最小', () => { assert.strictEqual(normPage('2484、2485'), '2484'); assert.strictEqual(normPage('2485/2484'), '2484'); assert.strictEqual(normPage('1-2'), '1'); assert.strictEqual(normPage('2484 2485'), '2484'); });
+t('頁碼：各種寫法', () => {
+  assert.strictEqual(normPage('—2484—'), '2484'); assert.strictEqual(normPage('第12頁'), '12'); assert.strictEqual(normPage('二十一'), '21');
+  assert.strictEqual(normPage('廿三'), '23'); assert.strictEqual(normPage('iv'), '4'); assert.strictEqual(normPage('二〇'), '20'); assert.strictEqual(normPage('２４８４'), '2484');
+  assert.strictEqual(normPage(''), ''); assert.strictEqual(normPage(null), ''); assert.strictEqual(normPage('無'), '');
+});
+t('文字：全形半形、標點、異體字', () => {
+  assert.strictEqual(normText('臺灣　省 政府'), normText('台灣省政府'));
+  assert.strictEqual(normText('河北省政府訓令第三五四七號(不另行文)', { stripRemark: true }), normText('河北省政府訓令第三五四七號'));
+  assert.notStrictEqual(normText('河北省政府訓令第三五四七號(不另行文)'), normText('河北省政府訓令第三五四七號'));
+  assert.strictEqual(normText('ＡＢＣ１２３'), 'ABC123');
+});
+t('日期：民國與西元', () => {
+  assert.strictEqual(normDate('中華民國五十二年三月五日'), '1963-03-05'); assert.strictEqual(normDate('民國52年3月5日'), '1963-03-05');
+  assert.strictEqual(normDate('1963-3-5'), '1963-03-05'); assert.strictEqual(normDate('中華民國三十年十月二十六日'), '1941-10-26'); assert.strictEqual(normDate('不是日期'), '');
+});
+t('錯字率與相似度', () => { assert.strictEqual(cer('糟坊', '糟坊'), 0); assert.strictEqual(cer('糟坊', '精坊'), 0.5); assert.strictEqual(cer('', ''), 0); assert.ok(sim('abcd', 'abce') === 0.75); });
+t('是否廣告', () => { assert.strictEqual(normBool('是'), '1'); assert.strictEqual(normBool('否'), '0'); assert.strictEqual(normBool(''), ''); });
+t('CSV：BOM、引號、逗號、換行', () => {
+  const csv = '﻿題名,備註\r\n"甲,乙","第一行\n第二行"\r\n丙,\r\n';
+  const { records } = parseCSV(csv);
+  assert.strictEqual(records.length, 2); assert.strictEqual(records[0]['題名'], '甲,乙'); assert.strictEqual(records[0]['備註'], '第一行\n第二行'); assert.strictEqual(records[1]['題名'], '丙');
+  assert.strictEqual(parseCSV(toCSV(records, ['題名', '備註'])).records[0]['題名'], '甲,乙');
+});
+t('計分：頁碼編造、題名、欄位', () => {
+  const gold = { book: 'b', image: '1', articles: [{ title: '河北省政府訓令第三五四七號(不另行文)', author: '王樹常', role: '主席', column: '訓令', ad: '否', page: '2484' }] };
+  const good = scoreImage(gold, { page: '2484', articles: [{ title: '河北省政府訓令第三五四七號', author: '王樹常', author_role: '主席', column_name: '訓令', is_ad: false }] }, { stripRemark: true });
+  assert.deepStrictEqual(good.fields, { 頁碼: 'correct', '題名(首篇)': 'correct', 作者: 'correct', 作者角色: 'correct', 專欄: 'correct', 是否廣告: 'correct' });
+  const bad = scoreImage(gold, { page: '5123', articles: [{ title: '河北省政府訓令第三五四號', author: '', author_role: '', column_name: '', is_ad: false }] }, { stripRemark: true });
+  assert.strictEqual(bad.fields['頁碼'], 'wrong'); assert.strictEqual(bad.fields['題名(首篇)'], 'wrong'); assert.strictEqual(bad.fields['作者'], 'null'); assert.ok(bad.cer > 0 && bad.cer < 0.2);
+  const none = scoreImage({ book: 'b', image: '2', articles: [{ title: '', page: '' }] }, { page: '13', articles: [] });
+  assert.strictEqual(none.fields['頁碼'], 'extra'); // 答案是空白，AI 編了一個頁碼
+  const miss = scoreImage(gold, { page: '', articles: [] }, {}); assert.strictEqual(miss.fields['頁碼'], 'null'); assert.strictEqual(miss.fn, 1);
+});
+t('彙總：準確率、編造率', () => {
+  const g1 = { book: 'b', image: '1', articles: [{ title: '甲', page: '10' }] }, g2 = { book: 'b', image: '2', articles: [{ title: '乙', page: '' }] };
+  const agg = aggregate([scoreImage(g1, { page: '10', articles: [{ title: '甲' }] }), scoreImage(g2, { page: '99', articles: [{ title: '乙' }] })]);
+  assert.strictEqual(agg.fields['頁碼'].準確率, 1); assert.strictEqual(agg.fields['頁碼'].編造率, 1); assert.strictEqual(agg.篇目.f1, 1);
+});
+console.log(process.exitCode ? '\n有測試失敗' : `\n全部通過（${n} 項）`);
