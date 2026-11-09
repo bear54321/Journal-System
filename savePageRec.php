@@ -34,6 +34,12 @@ foreach ($in as $label => $r) {
   $rec['pnoAi'] = empty($r['pnoAi']) ? 0 : 1;
   $rec['pnoAuto'] = empty($r['pnoAuto']) ? 0 : 1;
   $rec['pnoSuggest'] = preg_replace('/\D/', '', (string)($r['pnoSuggest'] ?? '')); // AI 這次辨識到、與現有頁碼不同的頁碼（待使用者決定）
+  $rec['titleRaw'] = t($r['titleRaw'] ?? '');         // AI 給的篇名（還沒加上欄目）
+  $rec['titleAuto'] = t($r['titleAuto'] ?? '');       // 系統組合出來的題名（和 title 相同代表使用者沒有改過）
+  $rec['section'] = t($r['section'] ?? '');           // 目前採用的欄目標題
+  $rec['sectionPrinted'] = t($r['sectionPrinted'] ?? ''); // 這一頁版面上印出來的欄目標題（AI 回報）
+  $rec['sectionSrc'] = in_array($r['sectionSrc'] ?? '', ['printed', 'carried', 'toc', 'toc-fix'], true) ? $r['sectionSrc'] : '';
+  $rec['sectionNote'] = t($r['sectionNote'] ?? '');
   $rec['unsure'] = array_values(array_intersect(is_array($r['unsure'] ?? null) ? $r['unsure'] : [], ['title', 'author', 'column']));
   // 同一張影像的其他題名（逐頁核對清單裡的子列）：除了題名、作者、專欄、角色，也各自保存「廣告」「已確認」
   $rec['more'] = array_map(function ($m) {

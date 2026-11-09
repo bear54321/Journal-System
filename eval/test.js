@@ -57,4 +57,17 @@ t('評測修正：配對不到的篇目，不算在專欄／廣告的「沒輸�
   const r = scoreImage(gold, { page: '', articles: [{ title: '完全不同的題名', author: '', author_role: '', column_name: '', is_ad: false }] }, { stripRemark: true });
   assert.strictEqual(r.fields['是否廣告'], undefined); assert.strictEqual(r.fields['專欄'], undefined); assert.strictEqual(r.fn, 1);
 });
+t('作者角色：多位作者逐位比對', () => {
+  const gold = { book: 'b', image: '1', articles: [{ title: '貝隆夫人與阿根廷(下篇)', author: 'John Lear\n胡海', role: '原作\n譯', column: '', ad: '否', page: '45' }] };
+  const mk = (author, role) => ({ page: '45', articles: [{ title: '貝隆夫人與阿根廷(下篇)', author, author_role: role, column_name: '', is_ad: false }] });
+  const good = scoreImage(gold, mk('John Lear、胡海', '原作、譯'));
+  assert.strictEqual(good.fields['作者角色'], 'correct'); assert.strictEqual(good.fields['角色逐位對應'], 'correct'); assert.strictEqual(good.fields['作者'], 'correct');
+  const partial = scoreImage(gold, mk('John Lear、胡海', '譯')); // 兩位作者只回一個角色
+  assert.strictEqual(partial.fields['作者角色'], 'wrong'); assert.strictEqual(partial.fields['角色逐位對應'], 'wrong');
+  const swapped = scoreImage(gold, mk('John Lear、胡海', '譯、原作')); assert.strictEqual(swapped.fields['作者角色'], 'wrong'); assert.strictEqual(swapped.fields['角色逐位對應'], 'correct');
+  const single = scoreImage({ book: 'b', image: '2', articles: [{ title: '甲', author: '張三', role: '撰', column: '', ad: '否', page: '1' }] }, { page: '1', articles: [{ title: '甲', author: '張三', author_role: '撰', column_name: '', is_ad: false }] });
+  assert.strictEqual(single.fields['作者角色'], 'correct'); assert.strictEqual(single.fields['角色逐位對應'], undefined);
+  const none = scoreImage({ book: 'b', image: '3', articles: [{ title: '乙', author: '', role: '', column: '', ad: '否', page: '1' }] }, { page: '1', articles: [{ title: '乙', author: '', author_role: '', column_name: '', is_ad: false }] });
+  assert.strictEqual(none.fields['作者角色'], 'blank_ok');
+});
 console.log(process.exitCode ? '\n有測試失敗' : `\n全部通過（${n} 項）`);

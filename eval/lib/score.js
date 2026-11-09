@@ -10,6 +10,39 @@ const { normText, normPage, normBool, cer, sim } = require('./normalize');
 
 const outcome = (g, p) => (!g && !p) ? 'blank_ok' : (!g && p) ? 'extra' : (g && !p) ? 'null' : g === p ? 'correct' : 'wrong';
 
+// 作者角色：多位作者時，標準答案是「一行作者對一行角色」（例：作者 John Lear／胡海，角色 原作／譯），要逐位比對。
+// AI 的作者、角色可以用「、」「，」「,」換行等分隔。AI 的角色數量和作者數量一致時，依序對應；
+// 不一致（例如兩位作者只回一個「譯」）時，標準答案的角色只要出現在 AI 的角色裡就算對，但「角色逐位對應」這項會記為不符。
+const AI_SPLIT = /\r?\n|[|、，,;；／/]+/;
+function scoreRoles(ga, pa, add, rec, nt) {
+  const gAuthors = String(ga.author || '').split(/\r?\n|\|/).map(nt).filter(Boolean);
+  let gRoles = String(ga.role || '').split(/\r?\n|\|/).map(nt);
+  if (gRoles.length === 1 && gAuthors.length > 1) gRoles = gAuthors.map(() => gRoles[0]); // 只寫一個角色：套用到每位作者
+  const pAuthors = String(pa.rawAuthor || '').split(AI_SPLIT).map(nt).filter(Boolean);
+  const pRoles = String(pa.rawRole || '').split(AI_SPLIT).map(nt).filter(Boolean);
+  const aligned = pRoles.length === pAuthors.length;
+  const n = Math.max(gAuthors.length, 1), outs = [], gs = [], ps = [];
+  for (let i = 0; i < n; i++) {
+    const g = gRoles[i] || '';
+    let j = pAuthors.indexOf(gAuthors[i]);
+    if (j < 0 && pAuthors.length === gAuthors.length) j = i; // 人名讀錯時，依序對應
+    let p = '';
+    if (aligned && j >= 0 && j < pRoles.length) p = pRoles[j];
+    else if (pAuthors.length <= 1 && pRoles.length === 1) p = pRoles[0];
+    else if (g && pRoles.includes(g)) p = g; // 沒有逐位對應，但這個角色有出現
+    else if (pRoles.length) p = pRoles[0]; // 沒有逐位對應也沒出現：取第一個當「錯誤的輸出」
+    gs.push(g); ps.push(p); outs.push(!g && !p ? 'blank_ok' : (!g && p) ? 'extra' : (g && !p) ? 'null' : g === p ? 'correct' : 'wrong');
+  }
+  // 一篇合成一個結果：全部對才算對；有錯算錯；其餘有「沒輸出」算沒輸出；全空算空白；答案空白卻填了算多填
+  const o = outs.every(x => x === 'blank_ok') ? 'blank_ok' : outs.includes('wrong') ? 'wrong' : outs.includes('null') ? 'null' : outs.includes('extra') ? 'extra' : 'correct';
+  rec.fields['作者角色'] = o;
+  if (o === 'wrong' || o === 'null' || o === 'extra') rec.details.push({ field: '作者角色', outcome: o, gold: gs.join('／'), pred: pRoles.join('／'), title: ga.title, 作者: gAuthors.join('／') });
+  if (gAuthors.length > 1 && gRoles.some(Boolean)) { // R6：多位作者而且版面有印角色時，角色要逐位對應（標準答案沒有角色就不評）
+    rec.fields['角色逐位對應'] = aligned ? 'correct' : 'wrong';
+    if (!aligned) rec.details.push({ field: '角色逐位對應', outcome: 'wrong', gold: gs.join('／'), pred: pRoles.join('／') + '（作者 ' + pAuthors.length + ' 位、角色 ' + pRoles.length + ' 個）', title: ga.title });
+  }
+}
+
 // 標準答案的一張影像：{ book, image, articles:[{title,author,role,column,ad,page}] }；AI 的結果：{ articles:[{title,author,author_role,column_name,is_ad}], page }
 function scoreImage(gold, pred, opts = {}) {
   const thr = opts.matchThreshold ?? 0.8, pairThr = opts.pairThreshold ?? 0.5;
@@ -28,7 +61,7 @@ function scoreImage(gold, pred, opts = {}) {
   // 篇目
   const goldArts = gold.articles.filter(a => nt(a.title));
   if (!goldArts.length) return rec;
-  const predArts = (pred.articles || []).map(a => ({ title: nt(a.title), rawTitle: a.title || '', author: nt(a.author), role: nt(a.author_role), column: nt(a.column_name), ad: a.is_ad ? '1' : '0' }));
+  const predArts = (pred.articles || []).map(a => ({ title: nt(a.title), rawTitle: a.title || '', author: nt(a.author), role: nt(a.author_role), rawAuthor: a.author || '', rawRole: a.author_role || '', column: nt(a.column_name), ad: a.is_ad ? '1' : '0' }));
 
   // 首篇題名（逐頁核對預設採用的那一筆）
   const g0 = nt(goldArts[0].title), p0 = predArts[0] ? predArts[0].title : '';
@@ -50,7 +83,7 @@ function scoreImage(gold, pred, opts = {}) {
     if (!pa) continue; // 配對不到（AI 沒輸出這一篇，或題名差太多）：只算在篇目層級的漏找，不在這些欄位算「沒輸出」
     const get = (a, k) => a ? a[k] : '';
     add('作者', nt(ga.author), get(pa, 'author'), { title: ga.title });
-    add('作者角色', nt(ga.role), get(pa, 'role'), { title: ga.title });
+    scoreRoles(ga, pa, add, rec, nt);
     add('專欄', nt(ga.column), get(pa, 'column'), { title: ga.title });
     const gad = normBool(ga.ad);
     if (gad !== '') add('是否廣告', gad, pa ? pa.ad : '', { title: ga.title });

@@ -129,11 +129,17 @@ function list_books() {
   return array_values($books);
 }
 
+// 這一期要不要把欄目標題合併進題名：回傳連接符號，不需要就回傳 null（設定見 config.php 的 SECTION_TITLE_BOOKS）
+function section_joiner($book) {
+  foreach (SECTION_TITLE_BOOKS as $name => $joiner) if (mb_strpos($book, $name) !== false) return $joiner;
+  return null;
+}
+
 // ---- 「最初狀態」：第一次 AI 分析前的樣子（逐頁核對資料、篇目、頁碼） ----
 // 第一次用 AI 分析這一期時（analyze.php）自動記下，存在 data/<期>/initial/。之後可用 restoreInitial.php 一鍵還原。
 // 舊資料（這個功能加入前就已經分析過）沒有真正的最初狀態，改用推測的：逐頁核對資料視為「未分析」、
 // 頁碼移除 AI 填的（逐頁核對資料裡標為 AI 辨識／自動接續的頁）、篇目回到最早的備份版本（沒有備份就維持現況）。
-const INITIAL_FILES = ['index.json', 'pageno.json', 'pagerec.json'];
+const INITIAL_FILES = ['index.json', 'pageno.json', 'pagerec.json', 'tocmap.json'];
 function initial_dir($book) { return book_dir(DATA_DIR, $book) . DIRECTORY_SEPARATOR . 'initial'; }
 function ensure_initial($book) {
   $dir = book_dir(DATA_DIR, $book); $ini = initial_dir($book);

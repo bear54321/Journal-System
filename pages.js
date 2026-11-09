@@ -65,7 +65,7 @@ function pvStatus(i) {
 // 同一張影像的其他題名（子列）的狀態
 const subStatus = m => (!m.title ? 'bad' : m.ok ? 'ok' : 'review');
 const blankSub = () => ({ title: '', column: '', author: '', role: '', ad: false, ok: false });
-const blankRec = () => ({ own: false, title: '', column: '', author: '', role: '', ad: false, ok: false, unsure: [], more: [], ai: null, pnoAi: false, pnoAuto: false, pnoSuggest: '' });
+const blankRec = () => ({ own: false, title: '', column: '', author: '', role: '', ad: false, ok: false, unsure: [], more: [], ai: null, pnoAi: false, pnoAuto: false, pnoSuggest: '', titleRaw: '', titleAuto: '', section: '', sectionPrinted: '', sectionSrc: '', sectionNote: '' });
 
 /* ---------- 頁碼：印在書上的頁碼，統一存阿拉伯數字（和「編輯頁碼」是同一份資料 pages[].pno） ---------- */
 // 回傳阿拉伯數字字串；空白回傳 ''；看不懂回傳 null。「二十一」→21、「廿三」→23、「iv」→4、「（15）」→15
@@ -229,6 +229,7 @@ function toRec(res) {
   r.unsure = (a.uncertain || []).map(k => (k === 'column_name' ? 'column' : k));
   r.more = []; // AI 辨識到同一頁有多個題名時，只採用第一個；其他題名不再自動新增子列，需要時由使用者按「＋」自行新增
   r.ai = pick(a);
+  r.titleRaw = r.title; r.sectionPrinted = String(a.section_title || '').trim(); // 欄目標題：AI 只回報這一頁印出來的，題名的組合由 applySectionCarry 負責
   Object.defineProperty(r, 'cands', { value: { alts: a.alts || [], diff: a.diff || [] }, enumerable: false, writable: true });
   return r;
 }
@@ -310,7 +311,7 @@ async function runBatch(redo) {
   pvRender({ keepScroll: true });
   aiScan($('pvViewer'), true, `AI 分析中 0／${b.total}`);
   await Promise.all(PV.engine === 'local' ? [worker()] : [worker(), worker()]); // API：同時 2 組，避免超過每分鐘請求數；本機 OCR 吃 CPU，一次一組
-  PV.batch = null; aiScan($('pvViewer'), false); recFlush();
+  PV.batch = null; aiScan($('pvViewer'), false); applySectionCarry(is); recFlush();
   if (isThread(is) && !b.stop) fillPnoByOffset(is);
   const left = todo.filter(p => !is.rec[p.label]).length;
   pvRender({ keepScroll: true });
@@ -318,6 +319,10 @@ async function runBatch(redo) {
   if (PV.engine !== 'local' && !isThread(is) && [...b.models].some(m => /lite/i.test(m))) showNotice('⚠ 這次用的是備援模型（主模型今天的免費額度已用完），它的頁碼不準，系統沒有採用，所以頁碼是空的。額度恢復後，按「重新分析未確認的頁面」可補上頁碼。');
   if (b.error && left) toast(b.error + `（尚餘 ${left} 頁，已分析的都已保留，之後可按「繼續分析」）`);
   else toast((b.stop ? '已暫停，之後可按「繼續分析」' : left ? `完成，但有 ${left} 頁失敗，可按「繼續分析」重試` : '整期分析完成，請逐頁核對'));
+  if (!b.stop && !left && sectionJoiner(is) != null && PV.engine !== 'local') { // B：用目錄頁檢查欄目標題
+    toast('正在讀取目錄頁，校正欄目標題…'); const t = await buildTocMap(is); const n = applySectionCarry(is); if (is === issue()) pvRender({ keepScroll: true });
+    toast(t.pages ? `已用 ${t.pages} 個目錄頁校正欄目標題（${t.added} 筆對照，${n} 處變動）` : '沒有找到可用的目錄頁，欄目標題是依版面與前一頁判斷的，請逐頁核對');
+  }
   if (!b.stop && !left) await pnoRecheck(is);
 }
 // 頁碼不連續（AI 填的、還沒確認）的頁：用只找頁碼的專用方式（較高解析度、逐半檢查頁眉頁腳）自動重辨一次。
@@ -364,6 +369,14 @@ $('pvBatch').onclick = async () => {
   PV.engine = eng;
   const unanalyzed = is.pages.filter(p => !is.rec[p.label]).length;
   runBatch(unanalyzed === 0);
+};
+$('pvToc').onclick = async () => {
+  const is = issue(); if (!is.id || sectionJoiner(is) == null) return;
+  if (!hasKey()) { openAiDlg('請先輸入您的 Gemini API 金鑰，才能讀取目錄頁。'); return; }
+  const btn = $('pvToc'); btn.disabled = true; btn.textContent = '讀取目錄頁…';
+  try { PV.engine = 'api'; const t = await buildTocMap(is, true); const n = applySectionCarry(is); pvRender({ keepScroll: true }); toast(t.pages ? `已用 ${t.pages} 個目錄頁校正欄目標題（${t.added} 筆對照，${n} 處變動）` : '這一期沒有找到題名以「目錄」開頭的頁面，請先分析整期'); }
+  catch (e) { toast(e.message); }
+  btn.disabled = false; btn.textContent = '用目錄校正欄目';
 };
 $('pvStop').onclick = () => { if (PV.batch) PV.batch.stop = true; };
 
@@ -527,7 +540,7 @@ function pvEditor(i) {
     wrap.append(Object.assign(h('div', 'pv-hint full', '這一頁還沒有分析。'), {}));
     const acts = h('div', 'pv-acts full');
     const one = h('button', 'btn primary', '分析這一頁'); one.type = 'button';
-    one.onclick = async () => { const eng = await askEngine(); if (!eng) return; PV.engine = eng; one.disabled = true; one.textContent = '辨識中…'; aiScan($('pvViewer'), true); try { is.rec[p.label] = await analyzeOne(is, p); recSaveSoon(is); } catch (e) { toast(e.message); } aiScan($('pvViewer'), false); pvRender(); };
+    one.onclick = async () => { const eng = await askEngine(); if (!eng) return; PV.engine = eng; one.disabled = true; one.textContent = '辨識中…'; aiScan($('pvViewer'), true); try { is.rec[p.label] = await analyzeOne(is, p); applySectionCarry(is); recSaveSoon(is); } catch (e) { toast(e.message); } aiScan($('pvViewer'), false); pvRender(); };
     const man = h('button', 'btn', '手動填寫'); man.type = 'button';
     man.onclick = () => { is.rec[p.label] = { ...blankRec(), own: true }; recSaveSoon(is); pvRender({ focus: true }); };
     const inh = h('button', 'btn', i === 0 ? '前面沒有標題' : '沿用前頁'); inh.type = 'button';
@@ -540,6 +553,10 @@ function pvEditor(i) {
     const res = pvResolved(i);
     wrap.append(h('div', 'pv-hint full', i === 0 ? '這是第一頁，前面沒有任何一頁，沒有標題可以沿用。若這一頁是封面或有標題，請按「這頁有新標題」，或按「重新分析這一頁」讓 AI 判斷是否為封面。' : (res ? `↳ 這一頁沒有新標題，歸入前面的「${res.title}」。` : '↳ 這一頁沒有新標題，但前面也沒有標題可以沿用。')));
   } else {
+    if (r.sectionSrc && r.sectionSrc !== 'printed' && r.section) { // 欄目標題不是這一頁印出來的：請館員核對
+      const msg = r.sectionSrc === 'carried' ? `欄目標題「${r.section}」是沿用前面頁面的（這一頁沒有印出欄目標題），請核對；不對就直接修改題名。` : r.sectionSrc === 'toc' ? `欄目標題「${r.section}」來自本期目錄（這一頁沒有印出），請核對。` : `已依目錄校正欄目：${r.sectionNote}。請核對。`;
+      wrap.append(h('div', 'pv-hint full', msg));
+    }
     const field = (label, key, full) => {
       const f = h('div', 'f' + (full ? ' full' : '') + (r.unsure.includes(key) ? ' unsure' : ''));
       const lab = h('label', '', label); if (r.unsure.includes(key)) lab.append(h('span', 'unsure-tag', 'AI 不確定'));
@@ -572,7 +589,7 @@ function pvEditor(i) {
     if ((r.ok || (r.more || []).length) && !confirm('這一頁已確認過或有多個題名，重新分析會覆蓋目前的題名、作者等內容（包含新增的題名）。確定重新分析？')) return;
     PV.engine = eng;
     re.disabled = true; re.textContent = '辨識中…'; aiScan($('pvViewer'), true);
-    try { const nr = await analyzeOne(is, p); is.rec[p.label] = nr; recSaveSoon(is); syncRecToEntry(nr); toast('已重新分析這一頁'); } catch (e) { toast(e.message); }
+    try { const nr = await analyzeOne(is, p); is.rec[p.label] = nr; applySectionCarry(is); recSaveSoon(is); syncRecToEntry(nr); toast('已重新分析這一頁'); } catch (e) { toast(e.message); }
     aiScan($('pvViewer'), false);
     pvRender({ focus: true });
   };
@@ -642,6 +659,60 @@ function pvSubRow(i, k, m) {
   return row;
 }
 
+/* ---------- 欄目標題（只有 config.php 的 SECTION_TITLE_BOOKS 裡的刊物）----------
+   題名 = 欄目標題 + 連接符號 + 篇名（例：「一、專題研究 - 共匪的核子研究」）。
+   A：AI 回報「這一頁版面印出來的」欄目標題（sectionPrinted）；沒印的頁面，延用前面最近一頁的欄目。
+   B：用目錄頁（目錄對照 tocMap）檢查：目錄上這一篇所屬的欄目和目前採用的不同，就以目錄為準並標示；沒有欄目就補上。
+   題名被使用者改過（和 AI 的篇名、系統組合的題名都不同）就不再自動改。 */
+function sectionJoiner(is) { const m = window.SECTION_BOOKS || {}; const k = Object.keys(m).find(n => is.id.includes(n)); return k ? m[k] : null; }
+const secKey = s => String(s || '').normalize('NFKC').replace(/^[一二三四五六七八九十0-9]+[、．.\s]*/, '').replace(/[\s\p{P}\p{S}]+/gu, '');
+const secSim = (a, b) => { a = [...a]; b = [...b]; const m = Math.max(a.length, b.length); if (!m) return 1; let prev = Array.from({ length: b.length + 1 }, (_, i) => i); for (let i = 1; i <= a.length; i++) { const cur = [i]; for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = cur; } return 1 - prev[b.length] / m; };
+function tocLookup(is, raw) { // 目錄上最像這個篇名的一筆（相似度 ≥ 0.75）
+  const k = secKey(raw); if (!k || !is.tocMap || !is.tocMap.length) return null;
+  let best = null, bs = 0; for (const e of is.tocMap) { const s = secSim(k, secKey(e.title)); if (s > bs) { bs = s; best = e; } }
+  return best && bs >= 0.75 ? best : null;
+}
+// 依頁面順序重新計算每一篇的欄目標題與題名。回傳有變動的頁數。
+function applySectionCarry(is) {
+  const joiner = sectionJoiner(is); if (joiner == null) return 0;
+  let last = '', changed = 0;
+  for (const p of is.pages) {
+    const r = is.rec[p.label]; if (!r || !r.own) continue;
+    if (!r.titleRaw) { if (r.sectionPrinted) last = r.sectionPrinted; continue; } // 手動填寫的：不組合題名
+    const raw = r.titleRaw, printed = String(r.sectionPrinted || '').trim();
+    let section = printed, src = printed ? 'printed' : '', note = '';
+    if (printed) last = printed; else if (last) { section = last; src = 'carried'; }
+    const hit = tocLookup(is, raw);
+    if (hit) {
+      if (!section) { section = hit.section; src = 'toc'; note = '目錄上這一篇屬於「' + hit.section + '」'; }
+      else if (secKey(hit.section) !== secKey(section)) { note = '目錄上這一篇屬於「' + hit.section + '」，原本是「' + section + '」'; section = hit.section; src = 'toc-fix'; }
+      else note = '與目錄相符';
+      last = section;
+    }
+    const compose = section && !raw.startsWith(section) ? section + joiner + raw : raw;
+    const unedited = r.title === raw || r.title === r.titleAuto || !r.title;
+    if (unedited && r.title !== compose) { r.title = compose; changed++; }
+    if (unedited) r.titleAuto = compose;
+    if (r.section !== section || r.sectionSrc !== src || r.sectionNote !== note) { r.section = section; r.sectionSrc = src; r.sectionNote = note; changed++; }
+  }
+  if (changed) recSaveSoon(is);
+  return changed;
+}
+// B：找出目錄頁（題名以「目錄」開頭），用「分析目錄」讀出欄目與篇名的對照，存起來。force＝重新分析所有目錄頁
+async function buildTocMap(is, force) {
+  if (sectionJoiner(is) == null) return { pages: 0, added: 0 };
+  const done = new Set(force ? [] : (is.tocMap || []).map(e => e.tocPage));
+  const tocPages = is.pages.filter(p => { const r = is.rec[p.label]; return r && r.own && /^目錄/.test(r.titleRaw || r.title || '') && !done.has(p.label); }).slice(0, 15);
+  const keep = (is.tocMap || []).filter(e => !force && !tocPages.some(p => p.label === e.tocPage)); let added = 0; const fresh = [];
+  for (const p of tocPages) {
+    let res; try { res = await callAnalyze(is, { page: p.label, mode: 'toc', ...engineParam() }); } catch (e) { toast('分析目錄頁失敗：' + e.message); break; }
+    const ents = (res.entries || []).filter(e => e.title); if (!ents.some(e => e.level === 0) || !ents.some(e => e.level === 1)) continue; // 沒有「欄目 → 篇名」兩層就不用
+    let sec = ''; for (const e of ents) { if (e.level === 0) sec = e.title; else if (sec) { fresh.push({ tocPage: p.label, section: sec, title: e.title }); added++; } }
+  }
+  if (tocPages.length) { is.tocMap = [...keep, ...fresh]; try { await api('saveTocMap.php', { book: is.id, data: JSON.stringify(is.tocMap) }); } catch (e) { toast('目錄對照存檔失敗：' + e.message); } }
+  return { pages: tocPages.length, added };
+}
+
 const rowRefs = {};
 function updateRowSummary(i) {
   const ref = rowRefs[i]; if (!ref) return;
@@ -669,7 +740,7 @@ function pvRender(opts = {}) {
   const n = is.pages.length;
   PV.sel = Math.min(PV.sel, Math.max(0, n - 1));
   PV.junc = pnoJunctions(is);
-  $('dataType').value = dataType(is); $('dataType').disabled = !is.id;
+  $('dataType').value = dataType(is); $('dataType').disabled = !is.id; $('pvToc').hidden = sectionJoiner(is) == null;
   const sc = suggCount(); $('pvAdoptAll').hidden = !sc; $('pvAdoptAll').textContent = '採用全部 AI 頁碼建議（' + sc + '）';
   const c = pvProgress();
   // 統計卡

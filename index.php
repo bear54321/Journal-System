@@ -54,6 +54,7 @@ $books = list_books();
         <button class="link-btn" id="pvKeyBtn" type="button" title="按一下設定 AI 金鑰"></button>
         <button class="btn" id="pvApply" type="button" title="把逐頁資料合併成篇目目錄（連續同題名的頁會併成一筆）">套用到篇目目錄</button>
         <button class="btn" id="pvStop" type="button" hidden>暫停</button>
+        <button class="btn" id="pvToc" type="button" hidden title="用本期的目錄頁，檢查並校正每一篇的欄目標題">用目錄校正欄目</button>
         <button class="btn primary" id="pvBatch" type="button">分析整期</button>
       </div>
       <div class="theme-switch" role="group" aria-label="外觀">
@@ -234,7 +235,7 @@ $books = list_books();
 </dialog>
 <div class="toast" id="toast" role="status" hidden></div>
 <div class="notice-pop" id="noticePop" role="alert" hidden><button class="notice-x" type="button" aria-label="關閉提示" title="關閉">×</button><div class="notice-body"></div></div>
-<script>window.BOOKS = <?= json_encode(array_values($books), JSON_UNESCAPED_UNICODE) ?>; window.SERVER_KEY = <?= GEMINI_API_KEY !== '' ? 'true' : 'false' ?>;</script>
-<script src="app.js?v=23"></script>
-<script src="pages.js?v=43"></script>
+<script>window.BOOKS = <?= json_encode(array_values($books), JSON_UNESCAPED_UNICODE) ?>; window.SERVER_KEY = <?= GEMINI_API_KEY !== '' ? 'true' : 'false' ?>; window.SECTION_BOOKS = <?= json_encode(SECTION_TITLE_BOOKS, JSON_UNESCAPED_UNICODE) ?>;</script>
+<script src="app.js?v=24"></script>
+<script src="pages.js?v=44"></script>
 </body></html>

@@ -75,9 +75,10 @@ window.addEventListener('beforeunload', e => {
 });
 
 async function loadIssue(is) {
-  const [nums, pn, data, meta, recs] = await Promise.all([
+  const [nums, pn, data, meta, recs, tocmap] = await Promise.all([
     api('givePageNum.php', { book: is.id }), api('givePageno.php', { book: is.id, page: 'all' }),
-    api('giveData.php', { book: is.id }), api('saveMeta.php', { book: is.id, action: 'get' }), api('givePageRec.php', { book: is.id })]);
+    api('giveData.php', { book: is.id }), api('saveMeta.php', { book: is.id, action: 'get' }), api('givePageRec.php', { book: is.id }), api('giveTocMap.php', { book: is.id })]);
+  is.tocMap = parse(tocmap, []); if (!Array.isArray(is.tocMap)) is.tocMap = [];
   const map = parse(pn, {});
   is.pages = parse(nums, []).map(String).map(l => ({ id: l, label: l, pno: (map[l] && map[l][3]) || '' }));
   const flat = parse(data, {});

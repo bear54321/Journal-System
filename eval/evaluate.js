@@ -29,6 +29,13 @@ opt.apiKey = opt.apiKey || process.env.GEMINI_API_KEY || '';
 opt.tag = opt.tag || path.basename(opt.gold).replace(/\.[^.]+$/, '') + (opt.model ? '_' + opt.model : '');
 const OUT = path.join(__dirname, 'out', opt.tag), CACHE = path.join(__dirname, 'cache', opt.tag);
 
+// ---------- 欄目標題（和 config.php 的 SECTION_TITLE_BOOKS 一致）----------
+// 這些刊物的 AI 輸出會多一個 section_title（版面印出的欄目標題）；題名 = 欄目標題 + 連接符號 + 篇名。
+// 注意：評測抽樣的影像不是連續的頁面，所以只評「這一頁印出了欄目標題」的情況；「沒印就延用上一頁」要用連續頁面另外測。
+const SECTION_BOOKS = { '大陸匪情季報': ' - ' };
+const sectionJoiner = book => { const k = Object.keys(SECTION_BOOKS).find(n => book.includes(n)); return k ? SECTION_BOOKS[k] : null; };
+const withSection = (book, arts) => { const j = sectionJoiner(book); return j == null ? arts : (arts || []).map(a => a.section_title && a.title && !String(a.title).startsWith(a.section_title) ? { ...a, title: a.section_title + j + a.title } : a); };
+
 // ---------- 讀標準答案 ----------
 const ALIASES = {
   book: ['book', '資料夾', '資料', '期刊', '書名路徑', '刊名路徑'], image: ['image', '影像', '影像編號', '影像檔名', '檔名'],
@@ -122,7 +129,7 @@ async function runOnce(run) {
 const pct = v => v == null ? '–' : (v * 100).toFixed(1) + '%';
 function table(rows, headers) { return ['| ' + headers.join(' | ') + ' |', '|' + headers.map(() => '---').join('|') + '|', ...rows.map(r => '| ' + r.join(' | ') + ' |')].join('\n'); }
 function fieldTable(agg) {
-  const order = ['頁碼', '題名(首篇)', '作者', '作者角色', '專欄', '是否廣告'];
+  const order = ['頁碼', '題名(首篇)', '作者', '作者角色', '角色逐位對應', '專欄', '是否廣告'];
   const rows = order.filter(f => agg.fields[f]).map(f => { const x = agg.fields[f]; return [f, x.有答案的頁數, pct(x.準確率), pct(x.讀錯率), pct(x.漏填率), pct(x.編造率)]; });
   return table(rows, ['欄位', '有答案', '準確率', '讀錯', '漏填(AI 回空白)', '編造(答案是空卻填了)']);
 }
@@ -143,7 +150,7 @@ function fieldTable(agg) {
     const recs = [];
     for (const g of list) {
       const p = cache[g.key]; if (!p || p.error) continue;
-      const s = scoreImage(g, { articles: p.articles, page: p.page }, { stripRemark: opt.stripRemark });
+      const s = scoreImage(g, { articles: withSection(g.book, p.articles), page: p.page }, { stripRemark: opt.stripRemark });
       s.group = g.group; s.model = p.model; recs.push(s);
       for (const d of s.details) mism.push({ run: ri + 1, book: g.book, image: g.image, 欄位: d.field, 結果: d.outcome, 標準答案: d.gold, AI: d.pred, 所屬題名: d.title || '' });
     }

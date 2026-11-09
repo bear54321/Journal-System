@@ -26,4 +26,8 @@ if (!defined('GEMINI_MODELS')) define('GEMINI_MODELS', [GEMINI_MODEL, 'gemini-3-
 // 送出前把影像縮到長邊不超過這個像素（需要 GD 擴充），可加快速度並節省額度
 if (!defined('ANALYZE_MAX_EDGE')) define('ANALYZE_MAX_EDGE', 2000);
 // 本機 OCR 服務（ocr/server.py）的位址；框選辨識選「本機 OCR」時使用
+// 題名要合併「欄目標題」的刊物：資料夾路徑裡出現的刊名 => 連接符號（欄目 + 連接符號 + 篇名）。
+// 這些刊物的分析會多一個 section_title 欄位（AI 只回報「這一頁版面上印出來的」欄目標題），前端依序組合題名，
+// 沒印欄目標題的頁面延用前面最近一頁的欄目，並可用目錄頁校正。目前只有大陸匪情季報（館員已確認「 - 」，前後各一個空格）。
+if (!defined('SECTION_TITLE_BOOKS')) define('SECTION_TITLE_BOOKS', ['大陸匪情季報' => ' - ']);
 if (!defined('OCR_LOCAL_URL')) define('OCR_LOCAL_URL', 'http://127.0.0.1:8765');
