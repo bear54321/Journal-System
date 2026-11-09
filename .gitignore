@@ -27,3 +27,6 @@ ocr/php-server.log
 eval/gold/
 eval/cache/
 eval/out/
+
+# 範例庫：館員編目的影像與 Excel（數 GB，且是機構資料），不要上傳
+z/
