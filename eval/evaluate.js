@@ -129,7 +129,8 @@ function fieldTable(agg) {
 
 (async () => {
   if (opt.dry) {
-    const per = opt.mode === 'page' ? list.length : Math.ceil(list.length / opt.group);
+    const perBook = {}; list.forEach(g => { perBook[g.book] = (perBook[g.book] || 0) + 1; });
+    const per = opt.mode === 'page' ? list.length : Object.values(perBook).reduce((n, c) => n + Math.ceil(c / opt.group), 0); // 同一個資料夾的影像才會一起送
     console.log(`（預演，不呼叫 API）每輪約 ${per} 次請求，共 ${opt.runs} 輪 ≈ ${per * opt.runs} 次。免費額度每個模型每天約 20 次，請先確認。`); return;
   }
   const allRuns = [];

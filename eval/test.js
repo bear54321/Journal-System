@@ -45,4 +45,16 @@ t('彙總：準確率、編造率', () => {
   const agg = aggregate([scoreImage(g1, { page: '10', articles: [{ title: '甲' }] }), scoreImage(g2, { page: '99', articles: [{ title: '乙' }] })]);
   assert.strictEqual(agg.fields['頁碼'].準確率, 1); assert.strictEqual(agg.fields['頁碼'].編造率, 1); assert.strictEqual(agg.篇目.f1, 1);
 });
+t('評測修正：艷／豔視為同字', () => { assert.strictEqual(normText('艷骨記'), normText('豔骨記')); });
+t('評測修正：題名結尾的日期期間，有沒有括號都一起去除', () => {
+  const o = { stripRemark: true };
+  assert.strictEqual(normText('一週匪情大事紀要(八月十八日至八月廿四日)', o), normText('一周匪情大事紀要八月十八日至八月廿四日', o));
+  assert.strictEqual(normText('一週重要匪情大事紀要(五月十八日起廿四日止)', o), normText('一週重要匪情大事紀要', o));
+  assert.strictEqual(normText('一週匪情大事紀要(八月十八日至八月廿四日)'), normText('一周匪情大事紀要八月十八日至八月廿四日')); // 不去除附註時，括號本身是標點，也會被忽略
+});
+t('評測修正：配對不到的篇目，不算在專欄／廣告的「沒輸出」', () => {
+  const gold = { book: 'b', image: '9', articles: [{ title: '一週匪情大事紀要', author: '', role: '', column: '', ad: '否', page: '*' }] };
+  const r = scoreImage(gold, { page: '', articles: [{ title: '完全不同的題名', author: '', author_role: '', column_name: '', is_ad: false }] }, { stripRemark: true });
+  assert.strictEqual(r.fields['是否廣告'], undefined); assert.strictEqual(r.fields['專欄'], undefined); assert.strictEqual(r.fn, 1);
+});
 console.log(process.exitCode ? '\n有測試失敗' : `\n全部通過（${n} 項）`);

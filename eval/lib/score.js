@@ -21,8 +21,9 @@ function scoreImage(gold, pred, opts = {}) {
   };
 
   // 頁碼
-  const goldPage = normPage(gold.articles.map(a => a.page).find(Boolean) || '');
-  add('頁碼', goldPage, normPage(pred.page));
+  // 標準答案的頁碼寫「*」＝這張影像不評頁碼（例如 Excel 的頁數是括號［1］，編目者推算的，版面上不一定印著）
+  const rawPage = gold.articles.map(a => a.page).find(Boolean) || '';
+  if (rawPage !== '*') add('頁碼', normPage(rawPage), normPage(pred.page));
 
   // 篇目
   const goldArts = gold.articles.filter(a => nt(a.title));
@@ -46,6 +47,7 @@ function scoreImage(gold, pred, opts = {}) {
 
   // 配對上的篇目：逐欄比對
   for (const [ga, pa] of pairs) {
+    if (!pa) continue; // 配對不到（AI 沒輸出這一篇，或題名差太多）：只算在篇目層級的漏找，不在這些欄位算「沒輸出」
     const get = (a, k) => a ? a[k] : '';
     add('作者', nt(ga.author), get(pa, 'author'), { title: ga.title });
     add('作者角色', nt(ga.role), get(pa, 'role'), { title: ga.title });

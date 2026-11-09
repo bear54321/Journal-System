@@ -8,7 +8,7 @@ const path = require('path');
 const DEFAULT_VARIANTS = {
   '臺': '台', '著': '著', '着': '著', '爲': '為', '衆': '眾', '羣': '群', '峯': '峰', '綫': '線', '啓': '啟',
   '敍': '敘', '鎭': '鎮', '裏': '裡', '麽': '麼', '週': '周', '緖': '緒', '纔': '才', '遅': '遲', '册': '冊',
-  '体': '體', '蹟': '跡', '迹': '跡', '覈': '核', '勅': '敕', '閒': '間', '搾': '榨',
+  '体': '體', '蹟': '跡', '迹': '跡', '覈': '核', '勅': '敕', '閒': '間', '搾': '榨', '艷': '豔',
 };
 let VARIANTS = { ...DEFAULT_VARIANTS };
 function loadVariants(file) {
@@ -19,12 +19,18 @@ function loadVariants(file) {
   return VARIANTS;
 }
 
+const NUM = '[0-9〇零一二三四五六七八九十廿卅]+';
+const DATE_TAIL = new RegExp('(?:' + NUM + '月)?' + NUM + '日(?:起|止)?(?:至|到)?(?:' + NUM + '月)?(?:' + NUM + '日)?止?$', 'u');
+
 // ---- 文字：全形→半形、去空白與標點、異體字統一；可選擇去掉結尾的括號附註，如「(不另行文)」 ----
 function normText(s, opts = {}) {
   s = String(s == null ? '' : s).normalize('NFKC');
   if (opts.stripRemark) s = s.replace(/\([^()]*\)\s*$/u, '');
   s = s.replace(/[\s\p{P}\p{S}]+/gu, '');
-  return [...s].map(c => VARIANTS[c] || c).join('');
+  s = [...s].map(c => VARIANTS[c] || c).join('');
+  // 題名結尾的日期期間（例如「…大事紀要八月十八日至八月廿四日」），有沒有括號都視為附註，兩邊一起去除
+  if (opts.stripRemark) s = s.replace(DATE_TAIL, '');
+  return s;
 }
 
 // ---- 頁碼：「二十一」→21、「廿三」→23、「iv」→4、「—2484—」→2484；有多個數字時取最小的（和 analyze.php 的 ai_page 相同）----
