@@ -709,3 +709,81 @@ dialog.img-preview { width: min(1100px, calc(100vw - 24px)); height: min(92vh, 1
 .img-stage.zoomed { display: block; }
 .img-stage.zoomed img { max-width: none; max-height: none; cursor: zoom-out; }
 @media (max-width: 899px) { #imgPreviewHint { display: none; } }
+
+/* ---------- 影像上直接拖曳框選 → 掃描 → 選單（pages.js quickSelect） ---------- */
+.pv-viewer { cursor: crosshair; }
+.pv-viewer.pan-ready { cursor: grab; }
+.pv-viewer.panning { cursor: grabbing; }
+.qs-sel { z-index: 3; transition: opacity .25s ease, transform .25s ease; }
+.qs-sel.out, .qs-menu.out { opacity: 0; transform: scale(.96); pointer-events: none; }
+.qs-sel.scan { animation: qs-breathe 1.6s ease-in-out infinite; }
+.qs-sel.qs-empty { border: 2px dashed rgba(255, 255, 255, .7); background: rgba(255, 95, 109, .12); box-shadow: 0 0 0 9999px rgba(8, 12, 24, .35); }
+@keyframes qs-breathe { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.25) saturate(1.2); } }
+.qs-menu { position: absolute; z-index: 4; width: 210px; padding: 10px; border-radius: 16px; color: #fff;
+  background: rgba(24, 26, 44, .78); -webkit-backdrop-filter: blur(22px) saturate(1.5); backdrop-filter: blur(22px) saturate(1.5);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .22), 0 14px 40px rgba(0, 0, 0, .45), 0 0 34px rgba(130, 110, 255, .35);
+  animation: qs-pop .28s cubic-bezier(.2, .9, .3, 1.2); transition: opacity .25s ease, transform .25s ease; transform-origin: left center; }
+@keyframes qs-pop { from { opacity: 0; transform: scale(.88) translateX(-8px); } to { opacity: 1; transform: none; } }
+.qs-text { margin: 0 24px 8px 2px; font-size: var(--t-caption, 12px); line-height: 1.5; color: rgba(255, 255, 255, .85); max-height: 3em; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-all; }
+.qs-list { display: grid; gap: 4px; }
+.qs-item { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 10px; border: 0; border-radius: 10px; font: inherit; font-size: 14px; color: #fff; text-align: left; cursor: pointer; background: rgba(255, 255, 255, .08); transition: background .15s, transform .15s, box-shadow .15s; opacity: 0; animation: qs-item-in .3s ease forwards; }
+.qs-item:nth-child(1) { animation-delay: .05s; } .qs-item:nth-child(2) { animation-delay: .10s; } .qs-item:nth-child(3) { animation-delay: .15s; } .qs-item:nth-child(4) { animation-delay: .20s; }
+@keyframes qs-item-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.qs-item:hover, .qs-item:focus-visible { background: rgba(255, 255, 255, .18); outline: none; box-shadow: 0 0 0 1px rgba(255, 255, 255, .35), 0 0 16px rgba(130, 110, 255, .5); transform: translateX(2px); }
+.qs-item:active { transform: scale(.97); }
+.qs-star { flex: none; width: 16px; height: 16px; -webkit-mask: var(--qs-sparkle) center / contain no-repeat; mask: var(--qs-sparkle) center / contain no-repeat;
+  --qs-sparkle: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M10.5 2c.6 5 2.6 7.6 7.8 8.3-5.2.7-7.2 3.3-7.8 8.3-.6-5-2.6-7.6-7.8-8.3C7.9 9.6 9.9 7 10.5 2z'/%3E%3Cpath d='M19 14c.35 2.4 1.2 3.2 3.4 3.5-2.2.3-3.05 1.1-3.4 3.5-.35-2.4-1.2-3.2-3.4-3.5 2.2-.3 3.05-1.1 3.4-3.5z'/%3E%3C/svg%3E");
+  background: conic-gradient(from var(--ai-ang), #ff5f6d, #ffb347, #47d1a4, #4facfe, #a56cff, #ff5f6d); animation: ai-rot 2.4s linear infinite; }
+.qs-close { position: absolute; right: 8px; top: 6px; width: 24px; height: 24px; border: 0; border-radius: 50%; font-size: 17px; line-height: 1; color: rgba(255, 255, 255, .8); cursor: pointer; background: rgba(255, 255, 255, .1); }
+.qs-close:hover { background: rgba(255, 255, 255, .25); color: #fff; }
+@media (prefers-reduced-motion: reduce) { .qs-sel.scan, .qs-menu, .qs-item, .qs-star { animation: none; opacity: 1; } }
+
+/* 期刊目次 */
+.toc-view { display: none; flex-direction: column; gap: 12px; min-height: 0; }
+.app.mode-toc .toc-view { display: flex; }
+.app.mode-toc .pv, .app.mode-toc .work, .app.mode-toc .toolbar, .app.mode-toc .head-actions { display: none !important; }
+.t-toc, .app.mode-toc .t-pages, .app.mode-toc .t-catalog { display: none; }
+.app.mode-toc .t-toc { display: block; }
+.toc-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.toc-info { font-weight: 600; }
+.toc-table { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); overflow: auto; }
+.toc-table table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.toc-table th { position: sticky; top: 0; background: var(--surface-2); text-align: left; font-size: 12px; color: var(--fg-2); padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.toc-table td { padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.toc-table td.num { font-family: var(--mono); white-space: nowrap; }
+.toc-empty { padding: 28px; text-align: center; color: var(--fg-2); }
+.toc-table { flex: 1 1 auto; min-height: 70vh; display: flex; }
+.toc-frame { width: 100%; min-height: 70vh; border: 0; flex: 1; }
+.toc-img { max-width: 100%; margin: 0 auto; display: block; object-fit: contain; }
+.toc-main { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(340px, 440px) minmax(0, 1fr); gap: 20px; align-items: stretch; }
+.toc-form { align-self: start; }
+.toc-fields { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 12px 10px; align-items: center; margin-top: 14px; }
+.toc-fields > label, .toc-fields > .lab { text-align: right; font-weight: 600; color: var(--fg-2); font-size: 14px; }
+.toc-fields input[type="text"], .toc-fields select { width: 100%; }
+.toc-attach { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.toc-attach span { font-size: 13px; color: var(--fg-2); overflow-wrap: anywhere; }
+.toc-radio { display: flex; gap: 18px; }
+.toc-radio .check { display: inline-flex; align-items: center; gap: 6px; }
+.toc-val { font-weight: 600; overflow-wrap: anywhere; min-height: 1em; }
+.toc-form .actions { margin-top: 16px; }
+@media (max-width: 1100px) { .toc-main { grid-template-columns: 1fr; } }
+
+/* 期刊目次檢視器：沿用逐頁核對的影像檢視器外觀 */
+.toc-table { border: 0; background: none; overflow: visible; display: block; min-height: 0; }
+.toc-viewer { width: 100%; height: 78vh; min-height: 560px; cursor: grab; }
+.toc-viewer.panning { cursor: grabbing; }
+.toc-frame { display: block; width: 100%; height: 78vh; min-height: 560px; border: 0; border-radius: var(--r-md); }
+.toc-viewer { cursor: crosshair; }
+.toc-viewer.panning { cursor: grabbing; }
+.qs-item .qs-val { margin-left: auto; opacity: .8; font-family: var(--mono); font-size: 13px; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qs-item.dim { opacity: .45 !important; }
+.qs-item.all { background: rgba(130, 110, 255, .32); font-weight: 600; }
+.qs-item.used::after { content: "✓"; margin-left: 6px; color: #47d1a4; }
+.qs-item span:nth-child(2) { white-space: nowrap; }
+.qs-item.all { flex-wrap: wrap; row-gap: 2px; }
+.qs-item.all .qs-val { margin-left: 25px; flex-basis: 100%; max-width: 100%; white-space: normal; font-size: 12px; text-align: left; }
+.toc-issn { min-width: 0; }
+.toc-issn-row { display: flex; gap: 8px; }
+.toc-issn-row input { flex: 1 1 auto; min-width: 0; }
+.toc-issn-row .btn { flex: none; }
+.toc-cands { display: flex; flex-direction: column; align-items: stretch; gap: 6px; margin-top: 8px; }

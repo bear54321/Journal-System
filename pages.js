@@ -821,9 +821,9 @@ $('pvApply').onclick = applyToCatalog;
 
 /* ---------- 模式切換與快速鍵 ---------- */
 function setMode(m) {
-  $('app').classList.toggle('mode-pages', m === 'pages'); $('app').classList.toggle('mode-catalog', m === 'catalog');
+  $('app').classList.toggle('mode-pages', m === 'pages'); $('app').classList.toggle('mode-catalog', m === 'catalog'); $('app').classList.toggle('mode-toc', m === 'toc');
   document.querySelectorAll('#modeSeg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.m === m));
-  if (m === 'catalog') renderAll(); else { pvRender(); pvFit(); }
+  if (m === 'toc') tocRender(); else if (m === 'catalog') renderAll(); else { renderIssueSelect(); pvRender(); pvFit(); }
 }
 document.querySelectorAll('#modeSeg button').forEach(b => { b.onclick = () => setMode(b.dataset.m); });
 document.addEventListener('keydown', e => {

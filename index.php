@@ -10,8 +10,8 @@ $books = list_books();
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>郭廷以圖書館數位化資料編目工作臺</title>
 <meta name="claude:viewport-fit-sides" content="cover">
-<link rel="stylesheet" href="ui.css?v=31">
-<link rel="stylesheet" href="theme.css?v=13">
+<link rel="stylesheet" href="ui.css?v=40">
+<link rel="stylesheet" href="theme.css?v=14">
 <script src="theme.js?v=1"></script>
 </head>
 <body>
@@ -25,6 +25,7 @@ $books = list_books();
     <nav class="sb-nav" id="modeSeg" role="group" aria-label="工作模式">
       <button class="sb-item" type="button" data-m="pages" aria-pressed="true"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M3.5 6.5l1.5 1.5 2.5-3M3.5 12.5L5 14l2.5-3M3.5 18.5L5 20l2.5-3"/></svg><span>逐頁核對</span></button>
       <button class="sb-item" type="button" data-m="catalog" aria-pressed="false"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6v4H4zM14 11h6v4h-6zM14 17h6v4h-6z"/><path d="M7 9v10h7M7 13h7"/></svg><span>篇目目錄</span></button>
+      <button class="sb-item" type="button" data-m="toc" aria-pressed="false"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg><span>期刊目次</span></button>
     </nav>
     <div class="sb-label">工具</div>
     <nav class="sb-nav" aria-label="工具">
@@ -46,7 +47,7 @@ $books = list_books();
     <header class="page-head">
       <button class="btn icon-only menu-toggle" id="menuToggle" type="button" aria-label="開啟選單" aria-controls="sidebar"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
       <div class="ph-title">
-        <h1 class="t-pages">逐頁核對</h1><h1 class="t-catalog">篇目目錄</h1>
+        <h1 class="t-pages">逐頁核對</h1><h1 class="t-catalog">篇目目錄</h1><h1 class="t-toc">期刊目次</h1>
       </div>
       <span class="spacer"></span>
       <div class="head-actions">
@@ -89,6 +90,44 @@ $books = list_books();
       <div class="pv-viewer" id="pvViewer"><img id="pvImg" alt="" draggable="false"><span class="pv-tag" id="pvTag"></span>
         <div class="pv-zoom"><button type="button" id="pvOut" aria-label="縮小">−</button><button type="button" id="pvFit">符合視窗</button><button type="button" id="pvIn" aria-label="放大">＋</button></div>
       </div>
+    </div>
+  </section>
+  <section class="toc-view" id="viewToc" aria-label="期刊目次">
+    <div class="toc-bar">
+      <span class="toc-info" id="tocInfo" aria-live="polite"></span>
+      <span class="spacer"></span>
+      <button class="btn" type="button" id="tocRefresh">重新整理</button>
+      <button class="btn" type="button" id="tocOpen">另開視窗</button>
+      <button class="btn" type="button" id="tocAi" title="用 AI 讀取封面／目錄頁，自動填入 ISSN、卷、期、號、年、月">AI 辨識</button>
+      <button class="btn" type="button" id="tocDry" title="登入後台、找期刊、檢查重複，但不儲存">試送（不儲存）</button>
+      <button class="btn primary" type="button" id="tocUpload">上傳目次</button>
+    </div>
+    <p class="notice" id="tocStatus" aria-live="polite"></p>
+    <div class="toc-main">
+      <form class="card toc-form" id="tocForm" autocomplete="off">
+        <div class="card-head"><h2>編輯目次</h2></div>
+        <div class="toc-fields">
+          <label for="tmName">刊名：</label><input type="text" id="tmName">
+          <label for="tmIssn">ISSN：</label><div class="toc-issn"><div class="toc-issn-row"><input type="text" id="tmIssn" placeholder="非必填欄位"><button class="btn" type="button" id="tmIssnFind" title="用刊名到後台查 ISSN">查詢</button></div><div class="toc-cands" id="tmIssnCands" hidden></div></div>
+          <label for="tmStatus">狀態：</label>
+          <select id="tmStatus"><option value="">- 請選擇 -</option><?php foreach (TOC_STATUS_OPTIONS as $val => $lab) echo '<option value="' . htmlspecialchars((string)$val) . '">' . htmlspecialchars((string)$lab) . '</option>'; ?></select>
+          <label for="tmVol">卷：</label><input type="text" id="tmVol">
+          <label for="tmIssue">期：</label><input type="text" id="tmIssue">
+          <label for="tmNo">號：</label><input type="text" id="tmNo">
+          <label for="tmYear">年：</label><input type="text" id="tmYear">
+          <label for="tmMonth">月：</label><input type="text" id="tmMonth">
+          <span class="lab">附件：</span>
+          <div class="toc-attach"><span id="tmAttach"></span></div>
+          <span class="lab">新到狀態：</span>
+          <div class="toc-radio"><label class="check"><input type="checkbox" id="tmNewYes"> yes</label><label class="check"><input type="checkbox" id="tmNewNo"> no</label></div>
+          <span class="lab">建立者：</span><span class="toc-val" id="tmCreator"></span>
+          <span class="lab">建立時間：</span><span class="toc-val" id="tmCreated"></span>
+          <span class="lab">更新者：</span><span class="toc-val" id="tmUpdater"></span>
+          <span class="lab">更新時間：</span><span class="toc-val" id="tmUpdated"></span>
+        </div>
+        <div class="actions"><button class="btn primary" type="submit" id="tmSave">儲存</button></div>
+      </form>
+      <div class="toc-table" id="tocTable"></div>
     </div>
   </section>
   <main class="work">
@@ -237,5 +276,7 @@ $books = list_books();
 <div class="notice-pop" id="noticePop" role="alert" hidden><button class="notice-x" type="button" aria-label="關閉提示" title="關閉">×</button><div class="notice-body"></div></div>
 <script>window.BOOKS = <?= json_encode(array_values($books), JSON_UNESCAPED_UNICODE) ?>; window.SERVER_KEY = <?= GEMINI_API_KEY !== '' ? 'true' : 'false' ?>; window.SECTION_BOOKS = <?= json_encode(SECTION_TITLE_BOOKS, JSON_UNESCAPED_UNICODE) ?>;</script>
 <script src="app.js?v=24"></script>
-<script src="pages.js?v=44"></script>
+<script src="pages.js?v=50"></script>
+<script src="tocqs.js?v=5"></script>
+<script src="toc.js?v=12"></script>
 </body></html>

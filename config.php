@@ -30,4 +30,10 @@ if (!defined('ANALYZE_MAX_EDGE')) define('ANALYZE_MAX_EDGE', 2000);
 // 這些刊物的分析會多一個 section_title 欄位（AI 只回報「這一頁版面上印出來的」欄目標題），前端依序組合題名，
 // 沒印欄目標題的頁面延用前面最近一頁的欄目，並可用目錄頁校正。目前只有大陸匪情季報（館員已確認「 - 」，前後各一個空格）。
 if (!defined('SECTION_TITLE_BOOKS')) define('SECTION_TITLE_BOOKS', ['大陸匪情季報' => ' - ']);
+// 期刊目次：圖書館後台（libAdmin，沒有 API，uploadToc.php 以表單請求模擬）。帳密請放 config.local.php，不要寫在這裡。
+if (!defined('TOC_SITE_BASE')) define('TOC_SITE_BASE', 'https://lib.mh.sinica.edu.tw/libAdmin/manage/');
+if (!defined('TOC_SITE_USER')) define('TOC_SITE_USER', '');
+if (!defined('TOC_SITE_PASS')) define('TOC_SITE_PASS', '');
+// 「狀態」下拉選單的選項（值 => 顯示文字）。值必須和後台 <option value> 一致（2026-11-10 從後台頁面讀出，1～7）；選「請選擇」會送空白。
+if (!defined('TOC_STATUS_OPTIONS')) define('TOC_STATUS_OPTIONS', [1 => '停刊', 2 => '出版社拖刊', 3 => '尚未到刊', 4 => '無法取得', 5 => '缺刊到館', 6 => '該刊出版社延遲出刊', 7 => '電子期刊已出版']);
 if (!defined('OCR_LOCAL_URL')) define('OCR_LOCAL_URL', 'http://127.0.0.1:8765');

@@ -178,3 +178,6 @@ html:root[data-theme="light"] .viewer-wrap { border: 1px solid var(--line-strong
 html:root[data-theme="light"] #pvImg,
 html:root[data-theme="light"] #pageImg { filter: drop-shadow(0 2px 12px rgba(15, 30, 53, .22)); }
 html:root[data-theme="light"] .img-stage img { box-shadow: 0 4px 22px rgba(15, 30, 53, .22); }
+
+html:root[data-theme="light"] .toc-viewer { border: 1px solid var(--line-strong); }
+html:root[data-theme="light"] .toc-viewer img { filter: drop-shadow(0 2px 12px rgba(15, 30, 53, .22)); }
